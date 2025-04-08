@@ -53,3 +53,32 @@ impl Rank {
         }
     }
 }
+
+impl PlayingCard {
+    fn as_index(self) -> usize {
+        let suit_offset = match self.suit {
+            Suit::Spades => 0,
+            Suit::Hearts => 13,
+            Suit::Diamonds => 26,
+            Suit::Clubs => 39,
+        };
+    
+        let rank_offset = match self.rank {
+            Rank::Two => 0,
+            Rank::Three => 1,
+            Rank::Four => 2,
+            Rank::Five => 3,
+            Rank::Six => 4,
+            Rank::Seven => 5,
+            Rank::Eight => 6,
+            Rank::Nine => 7,
+            Rank::Ten => 8,
+            Rank::Jack => 9,
+            Rank::Queen => 10,
+            Rank::King => 11,
+            Rank::Ace => 12,
+        };
+    
+        suit_offset + rank_offset
+    }
+}
