@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 ggez = "0.9.3"
+poker = "0.6"
