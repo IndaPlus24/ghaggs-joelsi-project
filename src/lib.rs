@@ -4,7 +4,7 @@
 // Evaluera_hand()
 // Ge()
 
-use poker::{Evaluator, deck, Card}; // From: https://github.com/deus-x-mackina/poker
+use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
 
 pub struct PlayingCard {
     suit: Suit,
@@ -32,4 +32,24 @@ pub enum Rank {
     Jack,
     Queen,
     King,
+}
+
+impl Rank {
+    pub fn to_char() -> char {
+        match self {
+            Ace => 'A',
+            Two => '2',
+            Three => '3',
+            Four => '4',
+            Five => '5',
+            Six => '6',
+            Seven => '7',
+            Eight => '8',
+            Nine => '9',
+            Ten => 'T',
+            Jack => 'J',
+            Queen => 'Q',
+            King => 'K',
+        }
+    }
 }
