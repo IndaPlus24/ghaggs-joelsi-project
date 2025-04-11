@@ -5,12 +5,25 @@
 // Ge()
 
 use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
+use rand::Rng;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
-pub struct PlayingCard {
+#[derive(Clone, Copy, Debug)]
+pub struct Card {
     suit: Suit,
     rank: Rank,
 }
 
+pub struct Hand {
+    cards: Vec<Card>,
+}
+
+pub struct Deck {
+    cards: Vec<Card>,
+}
+
+#[derive(Clone, Copy, Debug, EnumIter)]
 pub enum Suit {
     Spades,
     Clubs,
@@ -18,6 +31,7 @@ pub enum Suit {
     Diamonds,
 }
 
+#[derive(Clone, Copy, Debug, EnumIter)]
 pub enum Rank {
     Ace,
     Two,
@@ -35,26 +49,26 @@ pub enum Rank {
 }
 
 impl Rank {
-    pub fn to_char() -> char {
+    pub fn to_char(&self) -> char {
         match self {
-            Ace => 'A',
-            Two => '2',
-            Three => '3',
-            Four => '4',
-            Five => '5',
-            Six => '6',
-            Seven => '7',
-            Eight => '8',
-            Nine => '9',
-            Ten => 'T',
-            Jack => 'J',
-            Queen => 'Q',
-            King => 'K',
+            Rank::Ace => 'A',
+            Rank::Two => '2',
+            Rank::Three => '3',
+            Rank::Four => '4',
+            Rank::Five => '5',
+            Rank::Six => '6',
+            Rank::Seven => '7',
+            Rank::Eight => '8',
+            Rank::Nine => '9',
+            Rank::Ten => 'T',
+            Rank::Jack => 'J',
+            Rank::Queen => 'Q',
+            Rank::King => 'K',
         }
     }
 }
 
-impl PlayingCard {
+impl Card {
     fn as_index(self) -> usize {
         let suit_offset = match self.suit {
             Suit::Spades => 0,
@@ -80,5 +94,31 @@ impl PlayingCard {
         };
     
         suit_offset + rank_offset
+    }
+}
+
+
+impl Deck {
+    fn new() -> Self {
+        let mut deck: Vec<Card> = Vec::new();
+        for suit in Suit::iter() {
+            for rank in Rank::iter() {
+                let card: Card = Card{ suit: suit, rank: rank };
+                deck.push(card);
+            }
+        }
+        Deck{cards: deck}
+    }
+
+    pub fn shuffle(&mut self) {
+        let mut shuffled: Vec<Card> = Vec::new();
+        let mut rng = rand::rng();
+        let indexes: Vec<usize> = (0..52).collect();
+        for i in 0..52 {
+            let random_index = rng.random_range(0..indexes.len());
+            shuffled[random_index] = self.cards[52 - i];
+            self.cards.pop();
+        }
+        self.cards = shuffled;
     }
 }
