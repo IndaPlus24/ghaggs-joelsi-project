@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 ggez = "0.9.3"
 poker_eval = "0.1.0"
+rand = "0.9.0"
+strum = "0.27.1"
+strum_macros = "0.27.1"
