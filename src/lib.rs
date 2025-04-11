@@ -121,4 +121,12 @@ impl Deck {
         }
         self.cards = shuffled;
     }
+
+    pub fn draw(&mut self, amount: i32) -> Vec<Card> {
+        let mut drawn_cards: Vec<Card> = Vec::new();
+        for _ in 0..amount {
+            drawn_cards.push(self.cards.pop().expect("Card draw failed in fn draw()"));
+        }
+        drawn_cards
+    }
 }
