@@ -6,6 +6,7 @@
 
 use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
 use rand::Rng;
+use rand::seq::SliceRandom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use itertools::Itertools;
@@ -13,33 +14,65 @@ use itertools::Itertools;
 use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five};
 use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as get_rank_seven};
 
+const DEBUG: bool = true;
+const CARD_SYMBOLS: [&str; 52] = [
+    "2C", "2D", "2H", "2S",  // 0–3
+    "3C", "3D", "3H", "3S",  // 4–7
+    "4C", "4D", "4H", "4S",  // 8–11
+    "5C", "5D", "5H", "5S",  // 12–15
+    "6C", "6D", "6H", "6S",  // 16–19
+    "7C", "7D", "7H", "7S",  // 20–23
+    "8C", "8D", "8H", "8S",  // 24–27
+    "9C", "9D", "9H", "9S",  // 28–31
+    "TC", "TD", "TH", "TS",  // 32–35
+    "JC", "JD", "JH", "JS",  // 36–39
+    "QC", "QD", "QH", "QS",  // 40–43
+    "KC", "KD", "KH", "KS",  // 44–47
+    "AC", "AD", "AH", "AS",  // 48–51
+];
+
 #[derive(Clone, Copy, Debug)]
 pub struct Card {
-    suit: Suit,
-    rank: Rank,
+    pub suit: Suit,
+    pub rank: Rank,
 }
 
 pub struct Collection {
-    cards: Vec<Card>,
+    pub cards: Vec<Card>,
 }
 
 pub struct Hand {
-    cards: Vec<Card>,
+    pub cards: Vec<Card>,
 }
 pub struct Deck {
-    cards: Vec<Card>,
+    pub cards: Vec<Card>,
 }
-pub struct Board {
-    cards: Vec<Card>,
-}
+pub type Board = Vec<Card>;
 
 pub struct Player {
-    cards: Hand,
+    pub hand: Hand,
 }
 
 pub struct Game {
-    deck: Deck,
-    players: Vec<Player>,
+    pub deck: Deck,
+    pub players: Vec<Player>,
+    pub board: Board,
+}
+
+impl Game {
+    pub fn new(players: usize) -> Self {
+        let mut player_list: Vec<Player> = Vec::new();
+        for i in 0..players {
+            player_list.push(Player::new());
+        }
+        Game { deck: Deck::new(), players: player_list, board: Vec::new() }
+    }
+}
+
+impl Player {
+    pub fn new() -> Self {
+        Player { hand: Hand::new() }
+    }
 }
 
 #[derive(Clone, Copy, Debug, EnumIter)]
@@ -90,32 +123,31 @@ impl Rank {
 impl Card {
     fn as_index(self) -> usize {
         let suit_offset = match self.suit {
-            Suit::Spades => 0,
-            Suit::Hearts => 13,
-            Suit::Diamonds => 26,
-            Suit::Clubs => 39,
+            Suit::Clubs => 0,
+            Suit::Diamonds => 1,
+            Suit::Hearts => 2,
+            Suit::Spades => 3,
         };
     
         let rank_offset = match self.rank {
             Rank::Two => 0,
-            Rank::Three => 1,
-            Rank::Four => 2,
-            Rank::Five => 3,
-            Rank::Six => 4,
-            Rank::Seven => 5,
-            Rank::Eight => 6,
-            Rank::Nine => 7,
-            Rank::Ten => 8,
-            Rank::Jack => 9,
-            Rank::Queen => 10,
-            Rank::King => 11,
-            Rank::Ace => 12,
+            Rank::Three => 4,
+            Rank::Four => 8,
+            Rank::Five => 12,
+            Rank::Six => 16,
+            Rank::Seven => 20,
+            Rank::Eight => 24,
+            Rank::Nine => 28,
+            Rank::Ten => 32,
+            Rank::Jack => 36,
+            Rank::Queen => 40,
+            Rank::King => 44,
+            Rank::Ace => 48,
         };
     
         suit_offset + rank_offset
     }
 }
-
 
 impl Deck {
     fn new() -> Self {
@@ -130,18 +162,11 @@ impl Deck {
     }
 
     pub fn shuffle(&mut self) {
-        let mut shuffled: Vec<Card> = Vec::new();
         let mut rng = rand::rng();
-        let indexes: Vec<usize> = (0..52).collect();
-        for i in 0..52 {
-            let random_index = rng.random_range(0..indexes.len());
-            shuffled[random_index] = self.cards[52 - i];
-            self.cards.pop();
-        }
-        self.cards = shuffled;
+        self.cards.shuffle(&mut rng);
     }
 
-    pub fn draw(&mut self, amount: i32) -> Vec<Card> {
+    pub fn draw(&mut self, amount: usize) -> Vec<Card> {
         let mut drawn_cards: Vec<Card> = Vec::new();
         for _ in 0..amount {
             drawn_cards.push(self.cards.pop().expect("Card draw failed in fn draw()"));
@@ -151,20 +176,31 @@ impl Deck {
 }
 
 impl Hand {
-    pub fn evaluate(&self, board: Vec<Card>) -> u32 {
+    pub fn new() -> Self {
+        Hand { cards: Vec::new() }
+    }
+
+
+    pub fn evaluate(&self, board: Vec<Card>) -> (u32, &str) {
         let mut cards = Collection::new();
         cards.cards.extend(&self.cards);
+        cards.cards.extend(&board);
         let amount_of_cards: usize = &self.cards.len() + board.len();
 
         if amount_of_cards < 5 || amount_of_cards > 7 {
-            return 1
+            return (0, "ERROR");
         }
 
         if amount_of_cards == 5 {
-            let t5 = build_tables_five(false);
-            let card_values: [usize; 5] = cards.cards.into_iter().map(|card| card.as_index()).collect::<Vec<usize>>().try_into().unwrap();
+            let t5 = build_tables_five(true);
+            let card_values: [usize; 5] = cards.cards
+                .into_iter()
+                .map(|card| card.as_index())
+                .collect::<Vec<usize>>()
+                .try_into()
+                .expect("Couldn't convert Vec to arr for five cards in evaluate()");
             let hand_rank: u32 = get_rank_five(&t5, card_values);
-            return hand_rank
+            return (hand_rank, rank_to_words(hand_rank))
         }
         else if amount_of_cards == 6 {
             let t5 = build_tables_five(false);
@@ -179,25 +215,45 @@ impl Hand {
                     get_rank_five(&t5, array)
                 })
                 .max()
-                .unwrap();
+                .expect("No max returned for 6 card hand in evaluate()");
 
-            return hand_rank
+            return (hand_rank, rank_to_words(hand_rank))
         }
         else if amount_of_cards == 7 {
             let t7 = build_tables_seven(false);
-            let card_values: [usize; 7] = cards.cards.into_iter().map(|card| card.as_index()).collect::<Vec<usize>>().try_into().unwrap();
+            let card_values: [usize; 7] = cards.cards
+                .into_iter()
+                .map(|card| card.as_index())
+                .collect::<Vec<usize>>()
+                .try_into()
+                .expect("Couldn't convert Vec to arr for seven cards in evaluate()");
             let hand_rank: u32 = get_rank_seven(&t7, card_values);
-            return hand_rank
+            return (hand_rank, rank_to_words(hand_rank))
         }
         else {
             println!("How did we get here...?");
         }
-        0
+        (0, "ERROR")
     }
 }
 
 impl Collection {
     pub fn new() -> Self {
-        return Collection { cards: Vec::new() }
+        Collection { cards: Vec::new() }
+    }
+}
+
+pub fn rank_to_words(rank: u32) -> &'static str {
+    match rank {
+        7452..=7461 => "Straight Flush",
+        7296..=7451 => "Four of a Kind",
+        7140..=7295 => "Full House",
+        5863..=7139 => "Flush",
+        5853..=5862 => "Straight",
+        4995..=5852 => "Three of a Kind",
+        4137..=4994 => "Two Pair",
+        1277..=4136 => "One Pair",
+        0..=1276    => "High Card",
+        _ => "Unknown Hand",
     }
 }
