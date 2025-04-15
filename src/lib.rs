@@ -8,6 +8,10 @@ use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
 use rand::Rng;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use itertools::Itertools;
+
+use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five};
+use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as get_rank_seven};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Card {
@@ -15,12 +19,27 @@ pub struct Card {
     rank: Rank,
 }
 
-pub struct Hand {
+pub struct Collection {
     cards: Vec<Card>,
 }
 
+pub struct Hand {
+    cards: Vec<Card>,
+}
 pub struct Deck {
     cards: Vec<Card>,
+}
+pub struct Board {
+    cards: Vec<Card>,
+}
+
+pub struct Player {
+    cards: Hand,
+}
+
+pub struct Game {
+    deck: Deck,
+    players: Vec<Player>,
 }
 
 #[derive(Clone, Copy, Debug, EnumIter)]
@@ -128,5 +147,57 @@ impl Deck {
             drawn_cards.push(self.cards.pop().expect("Card draw failed in fn draw()"));
         }
         drawn_cards
+    }
+}
+
+impl Hand {
+    pub fn evaluate(&self, board: Vec<Card>) -> u32 {
+        let mut cards = Collection::new();
+        cards.cards.extend(&self.cards);
+        let amount_of_cards: usize = &self.cards.len() + board.len();
+
+        if amount_of_cards < 5 || amount_of_cards > 7 {
+            return 1
+        }
+
+        if amount_of_cards == 5 {
+            let t5 = build_tables_five(false);
+            let card_values: [usize; 5] = cards.cards.into_iter().map(|card| card.as_index()).collect::<Vec<usize>>().try_into().unwrap();
+            let hand_rank: u32 = get_rank_five(&t5, card_values);
+            return hand_rank
+        }
+        else if amount_of_cards == 6 {
+            let t5 = build_tables_five(false);
+            let hand_rank: u32 = cards.cards
+                .into_iter()
+                .map(|card| card.as_index())
+                .collect::<Vec<usize>>()
+                .into_iter()
+                .combinations(5)
+                .map(|combination| {
+                    let array: [usize; 5] = combination.try_into().unwrap();
+                    get_rank_five(&t5, array)
+                })
+                .max()
+                .unwrap();
+
+            return hand_rank
+        }
+        else if amount_of_cards == 7 {
+            let t7 = build_tables_seven(false);
+            let card_values: [usize; 7] = cards.cards.into_iter().map(|card| card.as_index()).collect::<Vec<usize>>().try_into().unwrap();
+            let hand_rank: u32 = get_rank_seven(&t7, card_values);
+            return hand_rank
+        }
+        else {
+            println!("How did we get here...?");
+        }
+        0
+    }
+}
+
+impl Collection {
+    pub fn new() -> Self {
+        return Collection { cards: Vec::new() }
     }
 }
