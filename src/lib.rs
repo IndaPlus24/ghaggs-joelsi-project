@@ -1,9 +1,3 @@
-// Funktioner:
-// Skapa_lek()
-// Blanda_lek()
-// Evaluera_hand()
-// Ge()
-
 use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -14,22 +8,6 @@ use itertools::Itertools;
 use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five};
 use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as get_rank_seven};
 
-const DEBUG: bool = true;
-const CARD_SYMBOLS: [&str; 52] = [
-    "2C", "2D", "2H", "2S",  // 0–3
-    "3C", "3D", "3H", "3S",  // 4–7
-    "4C", "4D", "4H", "4S",  // 8–11
-    "5C", "5D", "5H", "5S",  // 12–15
-    "6C", "6D", "6H", "6S",  // 16–19
-    "7C", "7D", "7H", "7S",  // 20–23
-    "8C", "8D", "8H", "8S",  // 24–27
-    "9C", "9D", "9H", "9S",  // 28–31
-    "TC", "TD", "TH", "TS",  // 32–35
-    "JC", "JD", "JH", "JS",  // 36–39
-    "QC", "QD", "QH", "QS",  // 40–43
-    "KC", "KD", "KH", "KS",  // 44–47
-    "AC", "AD", "AH", "AS",  // 48–51
-];
 
 #[derive(Clone, Copy, Debug)]
 pub struct Card {
