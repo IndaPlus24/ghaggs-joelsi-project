@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
 use ggez::glam::Vec2;
 use ggez::{Context, ContextBuilder, GameResult};
-use ggez::graphics::{self, Color, Rect};
+use ggez::graphics::{self, Color, Image, Rect};
 use ggez::event::{self, EventHandler};
 
 fn main() {
     // Make a Context.
     let (mut context, event_loop) = ContextBuilder::new("Poker", "Gustav Häggström")
+        .add_resource_path("./resources")
         .build()
         .expect("Failed to create ggez context!");
 
@@ -19,14 +22,37 @@ fn main() {
 }
 
 struct MyGame {
-    // Your state here...
+    //card_image: Image, // One card
+    card_images: HashMap<String, Image> // Multiple cards
+}
+
+fn load_all_cards(context: &mut Context) -> HashMap<String, Image> {
+    let suits = ["clubs", "spades", "diamonds", "hearts"];
+    let values = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "jack", "queen", "king", "ace"];
+
+    let mut cards = HashMap::new();
+    
+    for suit in suits.iter() {
+        for value in values.iter() {
+            let card_name = format!("{}_of_{}", value, suit);
+            let path = format!("/PNG-cards-1.3/{}.png", card_name);
+            if let Ok(image) = Image::from_path(context, path) {
+                cards.insert(card_name.clone(), image);
+            }
+            else {
+                println!("Could not find card: {}", card_name);
+            }
+        }
+    }
+    cards
 }
 
 impl MyGame {
-    pub fn new(_context: &mut Context) -> MyGame {
+    pub fn new(context: &mut Context) -> MyGame {
+        let card_images = load_all_cards(context);
         // Load/create resources such as images here.
         MyGame {
-            // ...
+            card_images,
         }
     }
 }
@@ -120,6 +146,13 @@ impl EventHandler for MyGame {
             Color::from_rgb(0, 100, 0)
         )?;
         canvas.draw(&right_circle, graphics::DrawParam::default());
+
+        if let Some(card) = self.card_images.get("king_of_diamonds") {
+            canvas.draw(card, graphics::DrawParam::default()
+            .dest(Vec2::new(250.0, 250.0))
+            .scale(Vec2::new(0.14, 0.14))
+        );
+        }
 
         canvas.finish(context)
     }
