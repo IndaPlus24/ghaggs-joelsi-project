@@ -194,20 +194,25 @@ impl Hand {
             return (hand_rank, rank_to_words(hand_rank))
         }
         else if amount_of_cards == 6 {
-            let hand_rank: u32 = cards.cards
+            let hand_rank: Option<u32> = cards.cards
                 .into_iter()
                 .map(|card| card.as_index())
                 .collect::<Vec<usize>>()
                 .into_iter()
                 .combinations(5)
                 .map(|combination| {
-                    let array: [usize; 5] = combination.try_into().unwrap();
-                    get_rank_five(&t5, array)
+                    match combination.try_into() {
+                        Ok(array) => Some(get_rank_five(&t5, array)),
+                        Err(_) => None,
+                    }
                 })
-                .max()
-                .expect("No max returned for 6 card hand in evaluate()");
+                .flatten()
+                .max();
 
-            return (hand_rank, rank_to_words(hand_rank))
+            match hand_rank {
+                Some(rank) => (rank, rank_to_words(rank)),
+                None => (0, "Failed to evaluate 6 card hand in evaluate()")
+            };
         }
         else if amount_of_cards == 7 {
             let card_values: [usize; 7] = cards.cards
