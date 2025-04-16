@@ -159,10 +159,10 @@ impl Hand {
     }
 
 
-    pub fn evaluate(&self, board: Vec<Card>) -> (u32, &str) {
+    pub fn evaluate(&self, board: &Vec<Card>) -> (u32, &str) {
         let mut cards = Collection::new();
         cards.cards.extend(&self.cards);
-        cards.cards.extend(&board);
+        cards.cards.extend(board);
         let amount_of_cards: usize = &self.cards.len() + board.len();
 
         if amount_of_cards < 5 || amount_of_cards > 7 {
