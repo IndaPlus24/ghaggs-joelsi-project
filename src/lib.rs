@@ -1,13 +1,12 @@
 use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
-use rand::Rng;
 use rand::seq::SliceRandom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use itertools::Itertools;
+use std::sync::Arc;
 
-use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five};
-use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as get_rank_seven};
-
+use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five, TableFive};
+use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as get_rank_seven, TableSeven};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Card {
@@ -35,15 +34,17 @@ pub struct Game {
     pub deck: Deck,
     pub players: Vec<Player>,
     pub board: Board,
+    pub t5: TableFive,
+    pub t7: Arc<TableSeven>,
 }
 
 impl Game {
     pub fn new(players: usize) -> Self {
         let mut player_list: Vec<Player> = Vec::new();
-        for i in 0..players {
+        for _ in 0..players {
             player_list.push(Player::new());
         }
-        Game { deck: Deck::new(), players: player_list, board: Vec::new() }
+        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), }
     }
 }
 
@@ -144,12 +145,25 @@ impl Deck {
         self.cards.shuffle(&mut rng);
     }
 
-    pub fn draw(&mut self, amount: usize) -> Vec<Card> {
-        let mut drawn_cards: Vec<Card> = Vec::new();
-        for _ in 0..amount {
-            drawn_cards.push(self.cards.pop().expect("Card draw failed in fn draw()"));
+    pub fn draw(&mut self, amount: usize) -> Result<Vec<Card>, &'static str> {
+        if self.cards.len() < amount {
+            return Err("Not enough cards in deck");
         }
-        drawn_cards
+        let drawn_cards: Vec<Card> = (0..amount)
+            .filter_map(|_| self.cards.pop())
+            .collect();
+        Ok(drawn_cards)
+    }
+
+    pub fn reset(&mut self) {
+        let mut deck: Vec<Card> = Vec::new();
+        for suit in Suit::iter() {
+            for rank in Rank::iter() {
+                let card: Card = Card{ suit: suit, rank: rank };
+                deck.push(card);
+            }
+        }
+        self.cards = deck;
     }
 }
 
@@ -159,7 +173,7 @@ impl Hand {
     }
 
 
-    pub fn evaluate(&self, board: &Vec<Card>) -> (u32, &str) {
+    pub fn evaluate(&self, board: &Vec<Card>, t5: &TableFive, t7: &Arc<TableSeven>) -> (u32, &str) {
         let mut cards = Collection::new();
         cards.cards.extend(&self.cards);
         cards.cards.extend(board);
@@ -170,7 +184,6 @@ impl Hand {
         }
 
         if amount_of_cards == 5 {
-            let t5 = build_tables_five(true);
             let card_values: [usize; 5] = cards.cards
                 .into_iter()
                 .map(|card| card.as_index())
@@ -181,7 +194,6 @@ impl Hand {
             return (hand_rank, rank_to_words(hand_rank))
         }
         else if amount_of_cards == 6 {
-            let t5 = build_tables_five(false);
             let hand_rank: u32 = cards.cards
                 .into_iter()
                 .map(|card| card.as_index())
@@ -198,7 +210,6 @@ impl Hand {
             return (hand_rank, rank_to_words(hand_rank))
         }
         else if amount_of_cards == 7 {
-            let t7 = build_tables_seven(false);
             let card_values: [usize; 7] = cards.cards
                 .into_iter()
                 .map(|card| card.as_index())
