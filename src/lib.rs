@@ -8,6 +8,8 @@ use std::sync::Arc;
 use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five, TableFive};
 use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as get_rank_seven, TableSeven};
 
+///// TODO: FUNKTION SOM JÄMFÖR ALLAS HÄNDER I GAME-STRUCTEN!!!
+
 #[derive(Clone, Copy, Debug)]
 pub struct Card {
     pub suit: Suit,
