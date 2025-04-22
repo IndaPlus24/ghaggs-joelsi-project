@@ -16,7 +16,7 @@ use lib::{Game, Player, Deck, Card, Suit, Rank, rank_to_words}; // Some structs 
 ### Initializing
 The library contains a *Game* struct. This contains all the necessary fields to play a game of poker.
 To initialize the *Game*, create a new *Game* and pass the amount of players as parameter.
-**!!!** *Remember*: the deck is sorted by default. Before dealing, shuffle the deck!
+*Remember*: the deck is sorted by default. Before dealing, **shuffle the deck!**
 ```
 let mut game = Game::new(5); // Creates a new game with five players.
 game.deck.shuffle();         // Sorts the playing deck.
