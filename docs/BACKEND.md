@@ -1,12 +1,10 @@
 # poker_backend
 
 ## Features
----
 Contains structs and functions to easily allow the construction of a simple poker game.
 Uses the crate [poker_eval](https://docs.rs/poker_eval/latest/poker_eval/) to evaluate hands based on some bit shifting black magic.
 
 ## Usage
----
 
 ### Importing the library
 ---
