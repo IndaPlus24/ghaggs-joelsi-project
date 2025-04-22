@@ -7,7 +7,6 @@ Uses the crate [poker_eval](https://docs.rs/poker_eval/latest/poker_eval/) to ev
 ## Usage
 
 ### Importing the library
----
 If *lib.rs* is in the same directory as *main.rs*, the module and its necessary functions can be imported with the **mod** and **use** keywords.
 ```
 mod lib;
@@ -15,7 +14,6 @@ use lib::{Game, Player, Deck, Card, Suit, Rank, rank_to_words}; // Some structs 
 ```
 
 ### Initializing
----
 The library contains a *Game* struct. This contains all the necessary fields to play a game of poker.
 To initialize the *Game*, create a new *Game* and pass the amount of players as parameter.
 **!!!** *Remember*: the deck is sorted by default. Before dealing, shuffle the deck!
@@ -25,7 +23,6 @@ game.deck.shuffle();         // Sorts the playing deck.
 ```
 
 ### Poker activities
----
 Here are some examples of functions that will be used during a game of poker.
 ```
 // Draw hands for all players
@@ -48,6 +45,5 @@ println!("Player 1 hand rank: {}, hand type: {}", hand_rank.0, hand_rank.1);
 ```
 
 ### Notes on evaluate
----
 evaluate() returns a tuple with both the "backend" rank and the "frontend" hand description. To access these, .0 in the tuple is the rank and .1 is the hand description.
 Additionaly, evaluate() must always be passed *&Game.t5* and *&Game.t7* as parameters. This is due to the heavy computational load required to create these variables. They are hand lookup tables, and recalculating them on every hand evaluation would render the game very slow.
