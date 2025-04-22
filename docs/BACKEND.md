@@ -42,6 +42,9 @@ match game.deck.draw(3) {
 // Evaluate a player's hand
 let hand_rank = game.players[0].hand.evaluate(&game.board, &game.t5, &game.t7);
 println!("Player 1 hand rank: {}, hand type: {}", hand_rank.0, hand_rank.1);
+
+// let best_player_index = game.best_hand();
+println!("Player {} has the best hand", best_player_index);
 ```
 
 ### Notes on evaluate
