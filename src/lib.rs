@@ -49,6 +49,20 @@ impl Game {
         }
         Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), }
     }
+
+    /// Evaluates all players hands and returns the index of the player with the winning hand.
+    /// 
+    /// Returns:
+    ///  - usize: contains the index of the player with the best hand in Game.players.
+    pub fn best_hand(&self) -> usize {
+        let mut vec: Vec<(u32, usize)> = Vec::new();
+        for (i, player) in self.players.iter().enumerate() {
+            let (rank, _) = player.hand.evaluate(&self.board, &self.t5, &self.t7);
+            vec.push((rank, i));
+        }
+        vec.sort_by_key(|&(rank, _)| rank);
+        vec[0].1
+    }
 }
 
 impl Player {
