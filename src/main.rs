@@ -1,13 +1,14 @@
 use std::collections::HashMap;
-use ggez::input::keyboard::{KeyCode, KeyInput};
-use rand::seq::SliceRandom;
-use rand::Rng;
 
-use ggez::glam::Vec2;
-use ggez::input::mouse::{self};
-use ggez::{Context, ContextBuilder, GameResult};
-use ggez::graphics::{self, Color, DrawParam, Image, Rect, Text};
-use ggez::event::{self, EventHandler, MouseButton};
+use ggez::{
+    glam::Vec2,
+    graphics::{self, Color, DrawMode, DrawParam, Image, Mesh, Rect, Text},
+    input::{keyboard::{KeyCode, KeyInput}, mouse::MouseButton},
+    Context, ContextBuilder, GameResult, event::{self, EventHandler}
+};
+
+use rand::Rng;
+use ghaggs_joelsi_project::{Board, Card, Deck, Game, Player  as BackendPlayer, Rank, Suit, rank_to_words};
 
 fn main() {
     // Make a Context.
@@ -16,16 +17,12 @@ fn main() {
         .build()
         .expect("Failed to create ggez context!");
 
-    // Create an instance of your event handler.
-    // Usually, you should provide it with the Context object to
-    // use when setting your game up.
     let my_game = MyGame::new(&mut context);
-
-    // Run!
     event::run(context, event_loop, my_game);
 }
 
 // Texas Hold em
+#[derive(Clone, Copy, PartialEq)]
 enum GameState {
     Preflop, 
     Flop,
@@ -34,23 +31,62 @@ enum GameState {
     Showdown,
 }
 
-#[derive(Clone)]
-struct Player {
-    name: String,
-    chips: u32,
-    hand: Vec<String>,
-    position: Vec2
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum PlayerActions {
+    None,
+    Bet,
+    Check,
+    Call,
+    Fold,
 }
 
+// Frontend player representation
+#[derive(Clone)]
+struct FrontendPlayer {
+    name: String,
+    chips: u32,
+    backend_player: BackendPlayer, // Use the backend Player struct    
+    position: Vec2
+}
 struct MyGame {
     card_images: HashMap<String, Image>, // Multiple cards
-    players: Vec<Player>,
+    players: Vec<FrontendPlayer>,
     chip_image: Image,
     game_state: GameState,
-    community_cards: Vec<String>,
-    deck: Vec<String>,
+    backend_game: Game, // Backend game logic
     elapsed_time: f32,
     winner_index: Option<usize>,
+    player_action: PlayerActions,
+    pot: u32,
+    // Poker
+}
+
+// Helper function to convert backend Card to image key
+fn card_to_image_key(card: &Card) -> String {
+    let value = match card.rank {
+        Rank::Ace => "ace",
+        Rank::Two => "2",
+        Rank::Three => "3",
+        Rank::Four => "4",
+        Rank::Five => "5",
+        Rank::Six => "6",
+        Rank::Seven => "7",
+        Rank::Eight => "8",
+        Rank::Nine => "9",
+        Rank::Ten => "10",
+        Rank::Jack => "jack",
+        Rank::Queen => "queen",
+        Rank::King => "king",
+    };
+
+    let suit = match card.suit {
+        Suit::Clubs => "clubs",
+        Suit::Spades => "spades",
+        Suit::Hearts => "hearts",
+        Suit::Diamonds => "diamonds",
+    };
+    
+    format!("{}_of_{}", value, suit)
 }
 
 fn load_all_cards(context: &mut Context) -> HashMap<String, Image> {
@@ -58,7 +94,6 @@ fn load_all_cards(context: &mut Context) -> HashMap<String, Image> {
     let values = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "jack", "queen", "king", "ace"];
 
     let mut cards = HashMap::new();
-    
     for suit in suits.iter() {
         for value in values.iter() {
             let card_name = format!("{}_of_{}", value, suit);
@@ -73,13 +108,12 @@ fn load_all_cards(context: &mut Context) -> HashMap<String, Image> {
     }
     cards
 }
-
+/*
 fn generate_deck() -> Vec<String> {
     let suits = ["clubs", "spades", "diamonds", "hearts"];
     let values = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "jack", "queen", "king", "ace"];
 
-    let mut deck = vec![];
-
+    let mut deck = Deck::new();
     for suit in suits.iter() {
         for value in values.iter() {
             deck.push(format!("{}_of_{}", value, suit));
@@ -88,81 +122,147 @@ fn generate_deck() -> Vec<String> {
     deck.shuffle(&mut rand::thread_rng());
     deck
 }
+*/
 
 impl MyGame {
     pub fn new(context: &mut Context) -> MyGame {
         let card_images = load_all_cards(context);
         let chip_image = Image::from_path(context, "/casino-poker-chip-png.webp")
-        .expect("Chip image not found");
+            .expect("Chip image not found");
 
-        let mut deck = generate_deck();
+        let mut backend_game = Game::new(2);
 
-        let mut players = vec![Player {
-            name: "Joel".to_string(),
-            chips: 1000,
-            hand: vec![],
-            position: Vec2::new(100.0, 500.0)
-        },
-        Player {
-            name: "Gustav".to_string(),
-            chips: 1000,
-            hand: vec![],
-            position: Vec2::new(700.0, 500.0)
-        }
+        backend_game.deck.shuffle();
+
+        let mut frontend_players = vec![
+            FrontendPlayer {
+                name: "Joel".to_string(),
+                chips: 1000,
+                backend_player: BackendPlayer::new(),
+                position: Vec2::new(100.0, 500.0)
+            },
+            FrontendPlayer {
+                name: "Gustav".to_string(),
+                chips: 1000,
+                backend_player: BackendPlayer::new(),
+                position: Vec2::new(700.0, 500.0)
+            },
         ];
 
-        for player in players.iter_mut() {
-            player.hand.push(deck.pop().unwrap());
-            player.hand.push(deck.pop().unwrap());
+        // Deal cards to players
+        for player in 0..backend_game.players.len() {
+            if let Ok(cards) = backend_game.deck.draw(2) {
+                backend_game.players[player].hand.cards = cards;
+            }
         }
-        // Load/create resources such as images here.
+
+        for (i, player) in frontend_players.iter_mut().enumerate() {
+            player.backend_player = backend_game.players[i].clone();
+        }
+
         MyGame {
             card_images,
-            players,
+            players: frontend_players,
             chip_image,
             game_state: GameState::Preflop,
-            community_cards: vec![],
-            deck,
+            backend_game,
             elapsed_time: 0.0,
             winner_index: None,
+            player_action: PlayerActions::None,
+            pot: 0,
         }
     }
+
     fn reset_game(&mut self) {
-        self.deck = generate_deck();
-        self.community_cards.clear();
-        self.elapsed_time = 0.0;
-        self.winner_index = None;
-        self.game_state = GameState::Preflop;
-        for player in self.players.iter_mut() {
-            player.hand.clear();
-            player.hand.push(self.deck.pop().unwrap());
-            player.hand.push(self.deck.pop().unwrap());
+    // Create a new backend game
+    self.backend_game = Game::new(2);
+        
+    // Shuffle the deck
+    self.backend_game.deck.shuffle();
+    
+    // Deal cards to players
+    for player in 0..self.backend_game.players.len() {
+        if let Ok(cards) = self.backend_game.deck.draw(2) {
+            self.backend_game.players[player].hand.cards = cards;
         }
+    }
+    
+    // Sync frontend players with backend players
+    for (i, player) in self.players.iter_mut().enumerate() {
+        player.backend_player = self.backend_game.players[i].clone();
+    }
+    
+    // Reset game state
+    self.game_state = GameState::Preflop;
+    self.elapsed_time = 0.0;
+    self.winner_index = None;
+    self.pot = 0;
+}
+
+// Determine the winner using backend evaluation
+fn determine_winner(&self) -> usize {
+    self.backend_game.best_hand()
     }
 }
+
 
 impl EventHandler for MyGame {
     fn update(&mut self, context: &mut Context) -> GameResult {
         let delta = ggez::timer::delta(context).as_secs_f32();
         self.elapsed_time += delta;
+
+        // Handle player actions
+        match self.player_action {
+            PlayerActions::Bet => {
+                println!("Player is betting");
+                self.pot += 50; // Test for the time being
+                self.player_action = PlayerActions::None;
+            }
+            PlayerActions::Check => {
+                println!("Player checked");
+                self.player_action = PlayerActions::None;
+            }
+            PlayerActions::Call => {
+                println!("Player called");
+                self.player_action = PlayerActions::None;
+            }
+            PlayerActions::Fold => {
+                println!("Player has folded");
+                self.winner_index = Some(1); // For the time being the other play wins, this is just for testing purpose
+                self.game_state = GameState::Showdown;
+                self.player_action = PlayerActions::None;
+            }
+            PlayerActions::None => {},
+        }
+        
+        // Handle game-phases 
         match self.game_state {
             GameState::Preflop => {
                 if self.elapsed_time > 1.0 {
-                    self.community_cards.extend((0..3).map(|_| self.deck.pop().unwrap()));
+                    // Deal flop (3 cards)
+                    if let Ok(flop_cards) = self.backend_game.deck.draw(3) {
+                        self.backend_game.board.extend(flop_cards);
+                    }
                     self.elapsed_time = 0.0;
                     self.game_state = GameState::Flop;
                 }
             },
             GameState::Flop => {
                 if self.elapsed_time > 2.0 {
-                    self.community_cards.push(self.deck.pop().unwrap());
+                    // Deal turn (1 card)
+                    if let Ok(turn_card) = self.backend_game.deck.draw(1) {
+                        self.backend_game.board.extend(turn_card);
+                    }
                     self.elapsed_time = 0.0;
                     self.game_state = GameState::Turn;
                 }
             },
             GameState::Turn => {
                 if self.elapsed_time > 2.0 {
-                    self.community_cards.push(self.deck.pop().unwrap());
+                    // Deal river (1 card)
+                    if let Ok(river_card) = self.backend_game.deck.draw(1) {
+                        self.backend_game.board.extend(river_card);
+                    }
                     self.elapsed_time = 0.0;
                     self.game_state = GameState::River;
                 }
@@ -171,7 +271,8 @@ impl EventHandler for MyGame {
                 if self.elapsed_time > 2.0 {
                     self.elapsed_time = 0.0;
                     self.game_state = GameState::Showdown;
-                    self.winner_index = Some(rand::thread_rng().gen_range(0..self.players.len()));
+                    // Determine winner using backend evaluation
+                    self.winner_index = Some(self.determine_winner());
                 }
             },
             _ => {}
@@ -263,59 +364,124 @@ impl EventHandler for MyGame {
         )?;
         canvas.draw(&right_circle, graphics::DrawParam::default());
 
-        for (i, card_name) in self.community_cards.iter().enumerate() {
-            if let Some(card) = self.card_images.get(card_name) {
-                canvas.draw(card, graphics::DrawParam::default()
+        // Draw community cards
+        for (i, card) in self.backend_game.board.iter().enumerate() {
+            let card_key = card_to_image_key(card);
+            if let Some(card_image) = self.card_images.get(&card_key) {
+                canvas.draw(card_image, graphics::DrawParam::default()
                 .dest(Vec2::new(250.0 + i as f32 * 110.0, 300.0))
                 .scale(Vec2::new(0.14, 0.14)),
                 );
             }
         }
+        
+        let winner_index = if self.game_state == GameState::Showdown {
+            Some(self.determine_winner())
+        } else {
+            None
+        };
+        
         for (i, player) in self.players.iter().enumerate() {
-            let is_winner = Some(i) == self.winner_index;
-
-            // Draw name
-            let mut name_text = graphics::Text::new(player.name.clone());
-            if is_winner  {
-                name_text = graphics::Text::new(format!("{} wins!", player.name));
+            let mut display_text = player.name.clone();
+        
+            if self.game_state == GameState::Showdown {
+                if i < self.backend_game.players.len() {
+                    let (rank, hand_type) = self.backend_game.players[i].hand.evaluate(
+                        &self.backend_game.board,
+                        &self.backend_game.t5,
+                        &self.backend_game.t7
+                    );
+                    display_text = format!("{}: {}", player.name, hand_type);
+                }
             }
+        
+            let is_winner = match winner_index {
+                Some(winner) => i == winner,
+                None => false,
+            };
+        
+            if is_winner {
+                display_text = format!("{} wins!", display_text);
+            }
+        
+            let name_text = graphics::Text::new(display_text);
             canvas.draw(&name_text, DrawParam::default().dest(player.position));
-
-            // Draw hand
-            for (j, card_name) in player.hand.iter().enumerate() {
-                if let Some(card_image) = self.card_images.get(card_name) {
+        
+            for (j, card) in self.backend_game.players[i].hand.cards.iter().enumerate() {
+                let card_key = card_to_image_key(card);
+                if let Some(card_image) = self.card_images.get(&card_key) {
                     let mut parameter = DrawParam::default()
-                    .dest(player.position + Vec2::new(j as f32 * 40.0, 30.0))
-                    .scale(Vec2::new(0.28, 0.28));
+                        .dest(player.position + Vec2::new(j as f32 * 40.0, 30.0))
+                        .scale(Vec2::new(0.28, 0.28));
+        
                     if is_winner {
                         parameter = parameter.color(Color::from_rgb(255, 255, 150));
                     }
+        
                     canvas.draw(card_image, parameter);
                 }
             }
         }
 
-
+        // Draw pot and chips
         canvas.draw(
             &self.chip_image,
             DrawParam::default()
             .dest(Vec2::new(200.0, 400.0))
             .scale(Vec2::new(0.3, 0.3)));
+        
+        let pot_text = Text::new(format!("Pot: {} chips", self.pot));
+        canvas.draw(&pot_text, DrawParam::default()
+            .dest(Vec2::new(200.0, 370.0))
+    );
 
-        canvas.finish(context)
+        // Draw action buttons
+        let button_labbels = ["Bet", "Check", "Call", "Fold"];
+        
+        for (i, label) in button_labbels.iter().enumerate() {
+            let x = 50.0 + i as f32 * 130.0;
+            let y = screen_height - 80.0;
+            let rect = Rect::new(x, y, 120.0, 50.0);
+            let button = graphics::Mesh::new_rectangle(
+                context,
+                DrawMode::fill(),
+                rect,
+                Color::from_rgb(50, 50, 50)
+            )?;
 
+        canvas.draw(&button, DrawParam::default());
 
+        let text = graphics::Text::new((*label).to_string());
+        canvas.draw(&text, DrawParam::default()
+        .dest(Vec2::new(x + 30.0, y + 15.0))
+        .scale(Vec2::new(1.5, 1.5)),
+        );
+        }
+        canvas.finish(context)?;
+        Ok(())
     }
-    
+
     fn mouse_button_down_event(
             &mut self,
-            _ctx: &mut Context,
+            _context: &mut Context,
             button: MouseButton,
             x: f32,
             y: f32,
-        ) -> Result<(), ggez::GameError> {
+        ) -> GameResult {
             if button == MouseButton::Left {
-                println!("click at {}, {}", x, y);
+                let buttons = [
+                    (PlayerActions::Bet, Rect::new(50.0, 620.0, 120.0, 50.0)),
+                    (PlayerActions::Check, Rect::new(180.0, 620.0, 120.0, 50.0)),
+                    (PlayerActions::Call, Rect::new(310.0, 620.0, 120.0, 50.0)),
+                    (PlayerActions::Fold, Rect::new(440.0, 620.0, 120.0, 50.0)),
+                ];
+
+                for (action, rect) in buttons.iter() {
+                    if rect.contains([x, y]).into() {
+                        println!("Player chose to {:?}", action);
+                        self.player_action = *action;
+                    }
+                }
             }
         Ok(())
     }
