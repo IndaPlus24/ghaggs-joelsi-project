@@ -3,7 +3,6 @@ use rand::seq::SliceRandom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use itertools::{any, Itertools};
-
 use std::sync::Arc;
 
 use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five, TableFive};
@@ -20,6 +19,7 @@ pub struct Card {
 pub struct Collection {
     pub cards: Vec<Card>,
 }
+
 #[derive(Clone)]
 pub struct Hand {
     pub cards: Vec<Card>,
@@ -42,6 +42,7 @@ pub struct Pot {
 #[derive(Debug)]
 pub struct PlayerChips {
     pub chips: u32
+}
 }
 pub struct Game {
     pub deck: Deck,
@@ -135,7 +136,7 @@ impl Game {
         for player in &mut self.players {
             player.chips.chips = 1000; // Reset player chips. Just nu kan vi bara recetta tillbaka till start, men vi lär ändra detta när man kan förlora
         }
-    }
+}
 
     /// Evaluates all players hands and returns the index of the player with the winning hand.
     /// 
@@ -148,6 +149,7 @@ impl Game {
             vec.push((rank, i));
         }
         vec.sort_by_key(|&(rank, _)| std::cmp::Reverse(rank));
+
         vec[0].1
     }
 }

@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use ggez::input::keyboard::{KeyCode, KeyInput};
+use rand::seq::SliceRandom;
+use rand::Rng;
 
 use ggez::{
     glam::Vec2,
@@ -9,6 +12,7 @@ use ggez::{
 
 use rand::Rng;
 use ghaggs_joelsi_project::{Board, Card, Deck, Game, Player  as BackendPlayer, Rank, Suit, rank_to_words};
+
 
 fn main() {
     // Make a Context.
@@ -22,7 +26,9 @@ fn main() {
 }
 
 // Texas Hold em
+
 #[derive(Clone, Copy, PartialEq)]
+
 enum GameState {
     Preflop, 
     Flop,
@@ -87,6 +93,7 @@ fn card_to_image_key(card: &Card) -> String {
     };
     
     format!("{}_of_{}", value, suit)
+
 }
 
 fn load_all_cards(context: &mut Context) -> HashMap<String, Image> {
@@ -124,10 +131,26 @@ fn generate_deck() -> Vec<String> {
 }
 */
 
+fn generate_deck() -> Vec<String> {
+    let suits = ["clubs", "spades", "diamonds", "hearts"];
+    let values = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "jack", "queen", "king", "ace"];
+
+    let mut deck = vec![];
+
+    for suit in suits.iter() {
+        for value in values.iter() {
+            deck.push(format!("{}_of_{}", value, suit));
+        }
+    }
+    deck.shuffle(&mut rand::thread_rng());
+    deck
+}
+
 impl MyGame {
     pub fn new(context: &mut Context) -> MyGame {
         let card_images = load_all_cards(context);
         let chip_image = Image::from_path(context, "/casino-poker-chip-png.webp")
+
             .expect("Chip image not found");
 
         let mut backend_game = Game::new(2);
@@ -184,6 +207,7 @@ impl MyGame {
     for player in 0..self.backend_game.players.len() {
         if let Ok(cards) = self.backend_game.deck.draw(2) {
             self.backend_game.players[player].hand.cards = cards;
+
         }
     }
     
@@ -210,6 +234,7 @@ impl EventHandler for MyGame {
     fn update(&mut self, context: &mut Context) -> GameResult {
         let delta = ggez::timer::delta(context).as_secs_f32();
         self.elapsed_time += delta;
+
 
         // Handle player actions
         match self.player_action {
@@ -243,16 +268,19 @@ impl EventHandler for MyGame {
                     if let Ok(flop_cards) = self.backend_game.deck.draw(3) {
                         self.backend_game.board.extend(flop_cards);
                     }
+
                     self.elapsed_time = 0.0;
                     self.game_state = GameState::Flop;
                 }
             },
             GameState::Flop => {
                 if self.elapsed_time > 2.0 {
+
                     // Deal turn (1 card)
                     if let Ok(turn_card) = self.backend_game.deck.draw(1) {
                         self.backend_game.board.extend(turn_card);
                     }
+
                     self.elapsed_time = 0.0;
                     self.game_state = GameState::Turn;
                 }
@@ -263,6 +291,7 @@ impl EventHandler for MyGame {
                     if let Ok(river_card) = self.backend_game.deck.draw(1) {
                         self.backend_game.board.extend(river_card);
                     }
+
                     self.elapsed_time = 0.0;
                     self.game_state = GameState::River;
                 }
@@ -273,6 +302,7 @@ impl EventHandler for MyGame {
                     self.game_state = GameState::Showdown;
                     // Determine winner using backend evaluation
                     self.winner_index = Some(self.determine_winner());
+
                 }
             },
             _ => {}
@@ -369,6 +399,7 @@ impl EventHandler for MyGame {
             let card_key = card_to_image_key(card);
             if let Some(card_image) = self.card_images.get(&card_key) {
                 canvas.draw(card_image, graphics::DrawParam::default()
+
                 .dest(Vec2::new(250.0 + i as f32 * 110.0, 300.0))
                 .scale(Vec2::new(0.14, 0.14)),
                 );
@@ -456,6 +487,7 @@ impl EventHandler for MyGame {
         .dest(Vec2::new(x + 30.0, y + 15.0))
         .scale(Vec2::new(1.5, 1.5)),
         );
+
         }
         canvas.finish(context)?;
         Ok(())
@@ -482,6 +514,7 @@ impl EventHandler for MyGame {
                         self.player_action = *action;
                     }
                 }
+
             }
         Ok(())
     }
