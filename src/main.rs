@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 
 use ggez::{
     glam::Vec2,
@@ -7,7 +7,7 @@ use ggez::{
     Context, ContextBuilder, GameResult, event::{self, EventHandler}
 };
 
-use rand::Rng;
+use rand::{rand_core::le, Rng};
 use ghaggs_joelsi_project::{Board, Card, Deck, Game, Player  as BackendPlayer, Rank, Suit, rank_to_words};
 
 fn main() {
@@ -57,8 +57,9 @@ struct MyGame {
     elapsed_time: f32,
     winner_index: Option<usize>,
     player_action: PlayerActions,
-    pot: u32,
-    // Poker
+    pot: u32, // Get rid of when pot is created in backend
+    player_actions_done: Vec<bool>,
+    current_player_index: usize 
 }
 
 // Helper function to convert backend Card to image key
@@ -130,7 +131,7 @@ impl MyGame {
         let chip_image = Image::from_path(context, "/casino-poker-chip-png.webp")
             .expect("Chip image not found");
 
-        let mut backend_game = Game::new(2);
+        let mut backend_game = Game::new(2, 1000);
 
         backend_game.deck.shuffle();
 
@@ -138,13 +139,13 @@ impl MyGame {
             FrontendPlayer {
                 name: "Joel".to_string(),
                 chips: 1000,
-                backend_player: BackendPlayer::new(),
+                backend_player: BackendPlayer::new(1000),
                 position: Vec2::new(100.0, 500.0)
             },
             FrontendPlayer {
                 name: "Gustav".to_string(),
                 chips: 1000,
-                backend_player: BackendPlayer::new(),
+                backend_player: BackendPlayer::new(1000),
                 position: Vec2::new(700.0, 500.0)
             },
         ];
@@ -170,38 +171,58 @@ impl MyGame {
             winner_index: None,
             player_action: PlayerActions::None,
             pot: 0,
+            player_actions_done: vec![false; 2],
+            current_player_index: 0,
+        }
+    }
+
+    fn sync_pot_and_chips(&mut self) {
+        self.pot = self.backend_game.pot.total; // Sync pot with backend
+        for (i, player) in self.players.iter_mut().enumerate() {
+            player.chips = self.backend_game.players[i].chips.chips; // Sync players with chips
+        }
+    }
+
+    fn place_bet(&mut self, bet_amount: u32) {
+        if let Err(error) = self.backend_game.place_bet(self.current_player_index, bet_amount) {
+            println!("Error placing bet: {}", error);
+        }
+        else {
+            // Sync state after placing a bet
+            self.sync_pot_and_chips();
         }
     }
 
     fn reset_game(&mut self) {
-    // Create a new backend game
-    self.backend_game = Game::new(2);
-        
-    // Shuffle the deck
-    self.backend_game.deck.shuffle();
-    
-    // Deal cards to players
-    for player in 0..self.backend_game.players.len() {
-        if let Ok(cards) = self.backend_game.deck.draw(2) {
-            self.backend_game.players[player].hand.cards = cards;
+        // Reset the game
+        self.backend_game = Game::new(2, 1000);
+        self.backend_game.deck.shuffle();
+        for player in 0..self.backend_game.players.len() {
+            if let Ok(cards) = self.backend_game.deck.draw(2) {
+                self.backend_game.players[player].hand.cards = cards;
+            }
         }
-    }
     
-    // Sync frontend players with backend players
-    for (i, player) in self.players.iter_mut().enumerate() {
-        player.backend_player = self.backend_game.players[i].clone();
-    }
-    
-    // Reset game state
-    self.game_state = GameState::Preflop;
-    self.elapsed_time = 0.0;
-    self.winner_index = None;
-    self.pot = 0;
-}
+        // Sync backend state to frontend state
+        for (i, player) in self.players.iter_mut().enumerate() {
+            player.backend_player = self.backend_game.players[i].clone();
+        }
 
-// Determine the winner using backend evaluation
-fn determine_winner(&self) -> usize {
-    self.backend_game.best_hand()
+        // Reset game variables
+        self.game_state = GameState::Preflop;
+        self.elapsed_time = 0.0;
+        self.winner_index = None;
+        self.pot = 0;
+    }
+
+    fn reset_actions(&mut self) {
+        self.player_actions_done = vec![false; self.players.len()];
+        self.elapsed_time = 0.0;
+        self.player_action = PlayerActions::None;
+    }
+
+    fn determine_winner(&self) -> usize {
+        self.backend_game.best_hand()
     }
 }
 
@@ -211,11 +232,13 @@ impl EventHandler for MyGame {
         let delta = ggez::timer::delta(context).as_secs_f32();
         self.elapsed_time += delta;
 
+        let all_acted = self.player_actions_done.iter().all(|&acted| acted);
+
         // Handle player actions
         match self.player_action {
             PlayerActions::Bet => {
                 println!("Player is betting");
-                self.pot += 50; // Test for the time being
+                self.place_bet(50); // Test for the time being
                 self.player_action = PlayerActions::None;
             }
             PlayerActions::Check => {
@@ -234,50 +257,53 @@ impl EventHandler for MyGame {
             }
             PlayerActions::None => {},
         }
-        
-        // Handle game-phases 
-        match self.game_state {
-            GameState::Preflop => {
-                if self.elapsed_time > 1.0 {
-                    // Deal flop (3 cards)
-                    if let Ok(flop_cards) = self.backend_game.deck.draw(3) {
-                        self.backend_game.board.extend(flop_cards);
+
+        if all_acted {
+            self.elapsed_time += delta;
+
+            // Handle game-phases 
+            match self.game_state {
+                GameState::Preflop => {
+                    if self.elapsed_time > 1.0 {
+                        // Deal flop (3 cards)
+                        if let Ok(flop_cards) = self.backend_game.deck.draw(3) {
+                            self.backend_game.board.extend(flop_cards);
+                        }
+                        self.reset_actions();
+                        self.game_state = GameState::Flop;
                     }
-                    self.elapsed_time = 0.0;
-                    self.game_state = GameState::Flop;
-                }
-            },
-            GameState::Flop => {
-                if self.elapsed_time > 2.0 {
-                    // Deal turn (1 card)
-                    if let Ok(turn_card) = self.backend_game.deck.draw(1) {
-                        self.backend_game.board.extend(turn_card);
+                },
+                GameState::Flop => {
+                    if self.elapsed_time > 2.0 {
+                        // Deal turn (1 card)
+                        if let Ok(turn_card) = self.backend_game.deck.draw(1) {
+                            self.backend_game.board.extend(turn_card);
+                        }
+                        self.reset_actions();
+                        self.game_state = GameState::Turn;
                     }
-                    self.elapsed_time = 0.0;
-                    self.game_state = GameState::Turn;
-                }
-            },
-            GameState::Turn => {
-                if self.elapsed_time > 2.0 {
-                    // Deal river (1 card)
-                    if let Ok(river_card) = self.backend_game.deck.draw(1) {
-                        self.backend_game.board.extend(river_card);
+                },
+                GameState::Turn => {
+                    if self.elapsed_time > 2.0 {
+                        // Deal river (1 card)
+                        if let Ok(river_card) = self.backend_game.deck.draw(1) {
+                            self.backend_game.board.extend(river_card);
+                        }
+                        self.reset_actions();
+                        self.game_state = GameState::River;
                     }
-                    self.elapsed_time = 0.0;
-                    self.game_state = GameState::River;
+                },
+                GameState::River => {
+                    if self.elapsed_time > 2.0 {
+                        self.game_state = GameState::Showdown;
+                        // Determine winner using backend evaluation
+                        self.winner_index = Some(self.determine_winner());
+                    }
+                },
+                _ => {}
                 }
-            },
-            GameState::River => {
-                if self.elapsed_time > 2.0 {
-                    self.elapsed_time = 0.0;
-                    self.game_state = GameState::Showdown;
-                    // Determine winner using backend evaluation
-                    self.winner_index = Some(self.determine_winner());
-                }
-            },
-            _ => {}
-        }
-    Ok(())
+            }
+        Ok(())
     }
 
     fn draw(&mut self, context: &mut Context) -> GameResult {
@@ -440,7 +466,7 @@ impl EventHandler for MyGame {
         
         for (i, label) in button_labbels.iter().enumerate() {
             let x = 50.0 + i as f32 * 130.0;
-            let y = screen_height - 80.0;
+            let y = 150.0;
             let rect = Rect::new(x, y, 120.0, 50.0);
             let button = graphics::Mesh::new_rectangle(
                 context,
@@ -470,16 +496,21 @@ impl EventHandler for MyGame {
         ) -> GameResult {
             if button == MouseButton::Left {
                 let buttons = [
-                    (PlayerActions::Bet, Rect::new(50.0, 620.0, 120.0, 50.0)),
-                    (PlayerActions::Check, Rect::new(180.0, 620.0, 120.0, 50.0)),
-                    (PlayerActions::Call, Rect::new(310.0, 620.0, 120.0, 50.0)),
-                    (PlayerActions::Fold, Rect::new(440.0, 620.0, 120.0, 50.0)),
+                    (PlayerActions::Bet, Rect::new(50.0, 150.0, 120.0, 50.0)),
+                    (PlayerActions::Check, Rect::new(180.0, 150.0, 120.0, 50.0)),
+                    (PlayerActions::Call, Rect::new(310.0, 150.0, 120.0, 50.0)),
+                    (PlayerActions::Fold, Rect::new(440.0, 150.0, 120.0, 50.0)),
                 ];
 
                 for (action, rect) in buttons.iter() {
                     if rect.contains([x, y]).into() {
                         println!("Player chose to {:?}", action);
                         self.player_action = *action;
+
+                        if self.current_player_index < self.player_actions_done.len() {
+                            self.player_actions_done[self.current_player_index] = true;
+                            self.current_player_index = (self.current_player_index + 1) % self.players.len();
+                        }
                     }
                 }
             }

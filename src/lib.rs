@@ -30,6 +30,7 @@ pub struct Deck {
 
 pub type Board = Vec<Card>;
 
+#[derive(Clone)]
 pub struct Player {
     pub hand: Hand,
     pub chips: PlayerChips
@@ -39,7 +40,7 @@ pub struct Pot {
     pub total: u32,
     pub contributions: Vec<u32>
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PlayerChips {
     pub chips: u32
 }
