@@ -2,7 +2,8 @@ use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
 use rand::seq::SliceRandom;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use itertools::Itertools;
+use itertools::{any, Itertools};
+
 use std::sync::Arc;
 
 use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five, TableFive};
@@ -29,27 +30,111 @@ pub struct Deck {
 
 pub type Board = Vec<Card>;
 
-#[derive(Clone)]
 pub struct Player {
     pub hand: Hand,
+    pub chips: PlayerChips
 }
-
+#[derive(Debug)]
+pub struct Pot {
+    pub total: u32,
+    pub contributions: Vec<u32>
+}
+#[derive(Debug)]
+pub struct PlayerChips {
+    pub chips: u32
+}
 pub struct Game {
     pub deck: Deck,
     pub players: Vec<Player>,
     pub board: Board,
     pub t5: TableFive,
     pub t7: Arc<TableSeven>,
-    //pub pot: u32
+    pub pot: Pot,
+}
+
+impl Pot {
+    // Initialise the pot
+    pub fn new(players: usize) -> Self {
+        Pot {
+            total: 0,
+            contributions: vec![0; players] // No one has any contribution in the start
+        }
+    }
+    // Add players contribution to the pot
+    pub fn add_constribution(&mut self, player_index: usize, amount: u32) {
+        if player_index < self.contributions.len() {
+            self.contributions[player_index] += amount;
+            self.total += amount;
+        }
+    }
+    // Reset pot after a round
+    pub fn reset(&mut self) {
+        self.total = 0;
+        self.contributions = vec![0; self.contributions.len()];
+    }
+
+    pub fn get_player_contribution(&self, player_index: usize) -> u32 {
+        self.contributions.get(player_index).copied().unwrap_or(0)
+    }
+}
+
+impl PlayerChips {
+    // Initialise a player with a certain amount of chips
+    pub fn new(initial_chips: u32) -> Self {
+        PlayerChips { chips: initial_chips }
+    }
+
+    pub fn deduct(&mut self, amount: u32) -> bool {
+        if self.chips >= amount {
+            self.chips -= amount;
+            true
+        }
+        else {
+            false // Not enough chips
+        }
+    }
+
+    pub fn add(&mut self, amount: u32) {
+        self.chips += amount;
+    }
 }
 
 impl Game {
-    pub fn new(players: usize) -> Self {
+    pub fn new(players: usize, initial_chips: u32) -> Self {
         let mut player_list: Vec<Player> = Vec::new();
         for _ in 0..players {
-            player_list.push(Player::new());
+            player_list.push(Player::new(initial_chips)); // Each player starts with initial chips
         }
-        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), }
+
+        let pot = Pot::new(players); // Initialise a pot with number of players
+
+        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot }
+    }
+
+    pub fn place_bet(&mut self, player_index: usize, bet_amount: u32) -> Result<(), &'static str> {
+        if player_index >= self.players.len() {
+            return Err("Invalid player index");
+        }
+
+        // Check if player has enough chips
+        if self.players[player_index].chips.chips < bet_amount {
+            return Err("Player doesn't have enough chips");
+        }
+
+        // Deduct the chips from the player
+        self.players[player_index].chips.deduct(bet_amount);
+
+        // Add to the pot
+        self.pot.add_constribution(player_index, bet_amount);
+
+        Ok(())
+    }
+
+    pub fn reset_round(&mut self) {
+        self.pot.reset();
+        for player in &mut self.players {
+            player.chips.chips = 1000; // Reset player chips. Just nu kan vi bara recetta tillbaka till start, men vi lär ändra detta när man kan förlora
+        }
     }
 
     /// Evaluates all players hands and returns the index of the player with the winning hand.
@@ -62,14 +147,17 @@ impl Game {
             let (rank, _) = player.hand.evaluate(&self.board, &self.t5, &self.t7);
             vec.push((rank, i));
         }
-        vec.sort_by_key(|&(rank, _)| rank);
+        vec.sort_by_key(|&(rank, _)| std::cmp::Reverse(rank));
         vec[0].1
     }
 }
 
 impl Player {
-    pub fn new() -> Self {
-        Player { hand: Hand::new() }
+    pub fn new(initial_chips: u32) -> Self {
+        Player { 
+            hand: Hand::new(),
+            chips: PlayerChips::new(initial_chips),
+        }
     }
 }
 
