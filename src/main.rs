@@ -7,8 +7,15 @@ use ggez::{
     Context, ContextBuilder, GameResult, event::{self, EventHandler}
 };
 
-use rand::{rand_core::le, Rng};
-use ghaggs_joelsi_project::{Board, Card, Deck, Game, Player  as BackendPlayer, Rank, Suit, rank_to_words};
+use ghaggs_joelsi_project::{
+    Game,
+    structs::{
+        player::Player as BackendPlayer,
+        enums::{Rank, Suit},
+        card::Card
+    }
+};
+
 
 fn main() {
     // Make a Context.
