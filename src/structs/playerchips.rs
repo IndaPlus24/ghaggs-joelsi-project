@@ -7,7 +7,7 @@ impl PlayerChips {
     pub fn new(initial_chips: u32) -> Self {
         PlayerChips { chips: initial_chips }
     }
-
+    // Deducting chips from the players "chips-bank", since they're stored
     pub fn deduct(&mut self, amount: u32) -> bool {
         if self.chips >= amount {
             self.chips -= amount;
@@ -17,7 +17,7 @@ impl PlayerChips {
             false // Not enough chips
         }
     }
-
+    // Add chips to the players "chips-bank" from the pot when winning a round
     pub fn add(&mut self, amount: u32) {
         self.chips += amount;
     }

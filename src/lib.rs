@@ -9,7 +9,7 @@ use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as ge
 
 use structs::deck::Deck;
 use structs::card::Card;
-use structs::player::Player;
+use structs::player::{self, Player};
 use structs::pot::Pot;
 
 ///// TODO: FUNKTION SOM JÄMFÖR ALLAS HÄNDER I GAME-STRUCTEN!!!
@@ -25,7 +25,6 @@ pub struct Game {
     pub pot: Pot,
 }
 
-
 impl Game {
     pub fn new(players: usize, initial_chips: u32) -> Self {
         let mut player_list: Vec<Player> = Vec::new();
@@ -38,29 +37,93 @@ impl Game {
         Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot }
     }
 
-    pub fn place_bet(&mut self, player_index: usize, bet_amount: u32) -> Result<(), &'static str> {
-        if player_index >= self.players.len() {
-            return Err("Invalid player index");
-        }
-
+    // Handling playeraction: betting
+    pub fn bet(&mut self, player_index: usize, amount: u32) -> Result<(), &'static str> {
+        let player = &mut self.players[player_index];
         // Check if player has enough chips
-        if self.players[player_index].chips.chips < bet_amount {
+        if player.chips.chips < amount {
             return Err("Player doesn't have enough chips");
         }
 
-        // Deduct the chips from the player
-        self.players[player_index].chips.deduct(bet_amount);
+        let current_bet = self.pot.current_bet;
 
-        // Add to the pot
-        self.pot.add_constribution(player_index, bet_amount);
+        // If player tries to bet under the current bet
+        if amount < current_bet {
+            return Err("Bet must be at least the the current bet(or use call)");
+        }
+
+        // Deduct the amount of chips from the betted player and add it to the pot
+        player.chips.deduct(amount);
+        self.pot.add_constribution(player_index, amount);
 
         Ok(())
     }
 
+    // Handling playeraction: calling
+    pub fn call(&mut self, player_index: usize) -> Result<(), &'static str> {
+        let player = &mut self.players[player_index];
+        let to_call = self.pot.current_bet.saturating_sub(self.pot.player_bets[player_index]);
+
+        // Incase a player can't call because of lack of chips. Use all in instead
+        if player.chips.chips < to_call {
+            return Err("Not enough chips to call");
+        }
+
+        // Deduct the amount of chips from the calling player and add it to the pot
+        player.chips.deduct(to_call);
+        self.pot.add_constribution(player_index, to_call);
+
+        Ok(())
+    }
+
+    // Handling playeraction: checking
+    pub fn check(&self, player_index: usize) -> Result<(), &'static str> {
+        // If a player has betted, checks are invalid
+        if self.pot.current_bet > self.pot.player_bets[player_index] {
+            return Err("Cannot check: need to call, raise or fold");
+        }
+        Ok(())
+    }
+
+    // Handling playeraction: folding
+    pub fn fold(&mut self, player_index: usize) {
+        self.players[player_index].is_folded = true;
+    }
+
+    // Check how many players that haven't folded, true or false.
+    pub fn non_folded_players_match_bet(&self) -> bool {
+        for (i, player) in self.players.iter().enumerate() {
+            // If player has folded, skip their turn
+            if player.is_folded {
+                continue;
+            }
+            let player_bet = self.pot.player_bets[i];
+            if player_bet != self.pot.current_bet {
+                return false;
+            }
+        }
+        true
+    }
+
+    // Award the pot to the winner of the round
+    pub fn award_pot_to_winner(&mut self) {
+        let winner_index = self.best_hand();
+        let winnings = self.pot.total;
+        self.players[winner_index].chips.add(winnings);
+        self.pot.reset();
+    }
+
+    // Reset pot after a round
     pub fn reset_round(&mut self) {
+        self.pot.reset_round();
+    }
+
+    // Reset the game after a player wins to be able to play again if wanted
+    pub fn reset_game(&mut self) {
         self.pot.reset();
         for player in &mut self.players {
-            player.chips.chips = 1000; // Reset player chips. Just nu kan vi bara recetta tillbaka till start, men vi lär ändra detta när man kan förlora
+            player.chips.chips = 1000;
+            player.is_folded = false;
         }
     }
 
@@ -71,6 +134,9 @@ impl Game {
     pub fn best_hand(&self) -> usize {
         let mut vec: Vec<(u32, usize)> = Vec::new();
         for (i, player) in self.players.iter().enumerate() {
+            if player.is_folded {
+                continue;
+            }
             let (rank, _) = player.hand.evaluate(&self.board, &self.t5, &self.t7);
             vec.push((rank, i));
         }
