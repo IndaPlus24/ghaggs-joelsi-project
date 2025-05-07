@@ -1,14 +1,19 @@
 # projekt-Poker
 
 # To Run
-https://github.com/IndaPlus24/ghaggs-joelsi-project.git
+git clone https://github.com/IndaPlus24/ghaggs-joelsi-project.git
+
 cd ghaggs-joelsi-project
+
 cargo run
 
 # Project root
 docs - holds work_flowchart in text and a pdf
+
 resources - holds all the visual images for the frontend
+
 src - holds three different things: 
+
     1. main.rs - frontend code
     2. lib.rs - backend game logic
     3. structs - all the structs the backend use
