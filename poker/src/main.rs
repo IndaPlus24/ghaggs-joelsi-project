@@ -1,45 +1,40 @@
+mod client_net;
+use client_net::run_client;
+use tokio::sync::mpsc::{Sender, Receiver};
+
 use std::{collections::HashMap, net, vec};
 
 use ggez::{
     event::{self, EventHandler}, glam::Vec2, graphics::{self, Color, DrawMode, DrawParam, Image, Mesh, Rect, Text}, input::{gamepad::gilrs::ev, keyboard::{KeyCode, KeyInput}, mouse::MouseButton}, Context, ContextBuilder, GameResult
 };
 
-use ghaggs_joelsi_project::{
+use poker::{
     structs::{
-        card::Card, enums::{Rank, Suit}, player::{self, Player as BackendPlayer}
+        card::Card, enums::{ClientMessage, GameState, PlayerActions, Rank, ServerMessage, Suit}, player::{self, Player as BackendPlayer}
     }, Game
 };
 
-
-fn main() {
+#[tokio::main]
+async fn main() { 
     // Make a Context.
     let (mut context, event_loop) = ContextBuilder::new("Poker", "Gustav, Joel")
         .add_resource_path("./resources")
         .build()
         .expect("Failed to create ggez context!");
 
-    let my_game = MyGame::new(&mut context);
+    use tokio::sync::mpsc;
+    let (to_server_tx, to_server_rx) = mpsc::channel(32);
+    let (to_game_tx, to_game_rx) = mpsc::channel(32);
+    
+    // Launch WebSocket client in background
+    tokio::spawn(async move {
+        run_client(to_server_rx, to_game_tx).await;
+    });
+
+    let my_game = MyGame::new(&mut context, to_server_tx, to_game_rx);
     event::run(context, event_loop, my_game);
 }
 
-// Texas Hold em
-#[derive(Clone, Copy, PartialEq)]
-enum GameState {
-    Preflop, 
-    Flop,
-    Turn, 
-    River,
-    Showdown,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum PlayerActions {
-    None,
-    Bet,
-    Check,
-    Call,
-    Fold,
-}
 
 // Frontend player representation
 #[derive(Clone)]
@@ -67,6 +62,8 @@ struct MyGame {
     show_slider: bool, 
     bet_button_clicked: bool,
     last_raiser_index: Option<usize>,
+    to_server_tx: Sender<ClientMessage>,
+    to_game_rx: Receiver<ServerMessage>,
     //game_over: bool, I'll maybe use this for GUI purpose
 }
 
@@ -120,7 +117,7 @@ fn load_all_cards(context: &mut Context) -> HashMap<String, Image> {
 }
 
 impl MyGame {
-    pub fn new(context: &mut Context) -> MyGame {
+    pub fn new(context: &mut Context, to_server_tx: Sender<ClientMessage>, to_game_rx: Receiver<ServerMessage>) -> MyGame {
         let card_images = load_all_cards(context);
         let chip_image = Image::from_path(context, "/casino-poker-chip-png.webp")
             .expect("Chip image not found");
@@ -176,6 +173,8 @@ impl MyGame {
             show_slider: false,
             bet_button_clicked: false,
             last_raiser_index: None,
+            to_server_tx: to_server_tx,
+            to_game_rx: to_game_rx,
             //game_over: false,
         }
     }
@@ -272,6 +271,15 @@ impl EventHandler for MyGame {
         let delta = ggez::timer::delta(context).as_secs_f32();
         self.elapsed_time += delta;
 
+        // RECEIVE FROM SERVER
+        while let Ok(msg) = self.to_game_rx.try_recv() {
+            match msg {
+                ServerMessage::Welcome(name) => println!("Server says: {}", name),
+                ServerMessage::GameState(state) => println!("Gamestate is now: {:?}", state),
+            }
+        }
+        //////////////////////////////////////////////////////////////////////////////////////////
+
         // Slider for betting
         if self.slider_dragging && self.slider_max > 0 {
             let mouse_x = ggez::input::mouse::position(context).x;
@@ -286,6 +294,7 @@ impl EventHandler for MyGame {
                     let bet_amount = self.slider_value;
                     if self.backend_game.bet(self.current_player_index, bet_amount).is_ok() {
                         self.last_raiser_index = Some(self.current_player_index);
+                        let _ = self.to_server_tx.try_send(ClientMessage::Bet(bet_amount));
                     }
                     else {
                         println!("Error with betting");
@@ -294,6 +303,7 @@ impl EventHandler for MyGame {
             PlayerActions::Check => {
                     if let Err(error) = self.backend_game.check(self.current_player_index) {
                         println!("Check error: {}", error);
+                        let _ = self.to_server_tx.try_send(ClientMessage::Check);
                     }
                 }
             PlayerActions::Call => {
@@ -303,6 +313,7 @@ impl EventHandler for MyGame {
             }
             PlayerActions::Fold => {
                 self.backend_game.fold(self.current_player_index);
+                let _ = self.to_server_tx.try_send(ClientMessage::Fold);
             }
             PlayerActions::None => return Ok(()),
         }

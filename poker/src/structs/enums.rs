@@ -1,4 +1,5 @@
 use strum_macros::EnumIter;
+use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq)]
 pub enum Suit {
@@ -43,4 +44,39 @@ impl Rank {
             Rank::King => 'K',
         }
     }
+}
+
+// Texas Hold em
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
+pub enum GameState {
+    Preflop, 
+    Flop,
+    Turn, 
+    River,
+    Showdown,
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
+pub enum PlayerActions {
+    None,
+    Bet,
+    Check,
+    Call,
+    Fold,
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ServerMessage {
+    GameState(GameState),
+    Welcome(String),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ClientMessage {
+    Join(String),
+    Bet(u32),
+    Fold,
+    Call,
+    Check,
 }
