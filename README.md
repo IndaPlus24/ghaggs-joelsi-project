@@ -1,11 +1,11 @@
 # projekt-Poker
 
 # To Run
-git clone https://github.com/IndaPlus24/ghaggs-joelsi-project.git
+    git clone https://github.com/IndaPlus24/ghaggs-joelsi-project.git
 
-cd ghaggs-joelsi-project
+    cd ghaggs-joelsi-project
 
-cargo run
+    cargo run
 
 # Project root
 docs - holds work_flowchart in text and a pdf
