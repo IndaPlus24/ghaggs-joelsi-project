@@ -1,6 +1,7 @@
 # projekt-Poker
 
 # To Run
+
     git clone https://github.com/IndaPlus24/ghaggs-joelsi-project.git
 
     cd ghaggs-joelsi-project
@@ -9,11 +10,8 @@
 
 # Project root
 docs - holds work_flowchart in text and a pdf
-
 resources - holds all the visual images for the frontend
-
 src - holds three different things: 
-
     1. main.rs - frontend code
     2. lib.rs - backend game logic
     3. structs - all the structs the backend use
@@ -23,4 +21,5 @@ The work_flowchart was used as a small sketch for the start to help us set up go
 
 # Author
 Gustav Häggström (ghaggs)
+
 Joel Simonsson (joelsi)
