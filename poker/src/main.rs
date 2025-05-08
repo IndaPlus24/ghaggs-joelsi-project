@@ -10,7 +10,7 @@ use ggez::{
 
 use poker::{
     structs::{
-        card::Card, enums::{ClientMessage, GameState, PlayerActions, Rank, ServerMessage, Suit}, player::{self, Player as BackendPlayer}
+        card::Card, enums::{ClientMessage, GamePhase as GameState, PlayerActions, Rank, ServerMessage, Suit}, player::{self, Player as BackendPlayer}
     }, Game
 };
 
@@ -276,6 +276,7 @@ impl EventHandler for MyGame {
             match msg {
                 ServerMessage::Welcome(name) => println!("Server says: {}", name),
                 ServerMessage::GameState(state) => println!("Gamestate is now: {:?}", state),
+                ServerMessage::Error(err) => println!("Server error: {}", err),
             }
         }
         //////////////////////////////////////////////////////////////////////////////////////////

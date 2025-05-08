@@ -11,6 +11,7 @@ use structs::deck::Deck;
 use structs::card::Card;
 use structs::player::{self, Player};
 use structs::pot::Pot;
+use structs::enums::GamePhase;
 
 ///// TODO: FUNKTION SOM JÄMFÖR ALLAS HÄNDER I GAME-STRUCTEN!!!
 
@@ -23,6 +24,7 @@ pub struct Game {
     pub t5: TableFive,
     pub t7: Arc<TableSeven>,
     pub pot: Pot,
+    pub phase: GamePhase,
 }
 
 impl Game {
@@ -34,7 +36,7 @@ impl Game {
 
         let pot = Pot::new(players); // Initialise a pot with number of players
 
-        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot }
+        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot, phase: GamePhase::Preflop, }
     }
 
     // Handling playeraction: betting
@@ -142,5 +144,47 @@ impl Game {
         }
         vec.sort_by_key(|&(rank, _)| std::cmp::Reverse(rank));
         vec[0].1
+    }
+
+    pub fn advance_phase(&mut self) {
+        match self.phase {
+            GamePhase::Preflop => {
+                if let Ok(flop) = self.deck.draw(3) {
+                    self.board.extend(flop);
+                }
+                self.phase = GamePhase::Flop;
+            }
+            GamePhase::Flop => {
+                if let Ok(turn) = self.deck.draw(1) {
+                    self.board.extend(turn);
+                }
+                self.phase = GamePhase::Turn;
+            }
+            GamePhase::Turn => {
+                if let Ok(river) = self.deck.draw(1) {
+                    self.board.extend(river);
+                }
+                self.phase = GamePhase::River;
+            }
+            GamePhase::River => {
+                self.phase = GamePhase::Showdown;
+            }
+            GamePhase::Showdown => {
+                let winner = self.best_hand();
+                self.award_pot_to_winner();
+                self.reset_round();
+                self.board.clear();
+                self.phase = GamePhase::Preflop;
+                // Optionally re-deal hands here
+                for player in &mut self.players {
+                    player.is_folded = false;
+                }
+                for player in &mut self.players {
+                    if let Ok(cards) = self.deck.draw(2) {
+                        player.hand.cards = cards;
+                    }
+                }
+            }
+        }
     }
 }

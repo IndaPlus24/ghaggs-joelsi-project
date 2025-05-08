@@ -1,7 +1,8 @@
 use strum_macros::EnumIter;
 use serde::{Serialize, Deserialize};
+use super::card::Card;
 
-#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Suit {
     Spades,
     Clubs,
@@ -9,7 +10,7 @@ pub enum Suit {
     Diamonds,
 }
 
-#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Rank {
     Ace,
     Two,
@@ -48,7 +49,7 @@ impl Rank {
 
 // Texas Hold em
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
-pub enum GameState {
+pub enum GamePhase {
     Preflop, 
     Flop,
     Turn, 
@@ -66,17 +67,37 @@ pub enum PlayerActions {
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum ServerMessage {
-    GameState(GameState),
-    Welcome(String),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientMessage {
     Join(String),
     Bet(u32),
     Fold,
-    Call,
     Check,
+    Call,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ServerMessage {
+    Welcome(String),
+    GameState(GameStateInfo),
+    Error(String),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GameStateInfo {
+    pub pot: u32,
+    pub players: Vec<PlayerPublicInfo>,
+    pub board: Vec<Card>,
+    pub current_turn: usize,
+    pub phase: String,
+    pub winner: Option<usize>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PlayerPublicInfo {
+    pub id: usize,
+    pub name: String,
+    pub chips: u32,
+    pub is_folded: bool,
+    pub hand: Option<[Card; 2]>, // only shown to the player themselves or on showdown
 }

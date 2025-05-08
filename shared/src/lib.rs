@@ -1,4 +1,4 @@
-use poker::structs::enums::GameState;
+use poker::structs::enums::GamePhase as GameState;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
