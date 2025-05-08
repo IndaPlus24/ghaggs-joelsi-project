@@ -1,7 +1,7 @@
 use std::{collections::HashMap, net, vec};
 
 use ggez::{
-    event::{self, EventHandler}, glam::Vec2, graphics::{self, Color, DrawMode, DrawParam, Image, Mesh, Rect, Text}, input::{gamepad::gilrs::ev, keyboard::{KeyCode, KeyInput}, mouse::MouseButton}, Context, ContextBuilder, GameResult
+    event::{self, EventHandler}, glam::Vec2, graphics::{self, Color, DrawMode, DrawParam, Image, Mesh, Rect, Text, TextFragment}, input::{gamepad::gilrs::ev, keyboard::{KeyCode, KeyInput}, mouse::MouseButton}, Context, ContextBuilder, GameResult
 };
 
 use ghaggs_joelsi_project::{
@@ -47,12 +47,13 @@ struct FrontendPlayer {
     name: String,
     chips: u32,
     backend_player: BackendPlayer, // Use the backend Player struct    
-    position: Vec2
+    position: Vec2,
+    last_action: Option<PlayerActions>,
 }
 struct MyGame {
     card_images: HashMap<String, Image>, // Multiple cards
     players: Vec<FrontendPlayer>,
-    chip_image: Image,
+    chip_images: Vec<Image>, // stores pot images for different ranges
     game_state: GameState,
     backend_game: Game, // Backend game logic
     elapsed_time: f32,
@@ -67,7 +68,8 @@ struct MyGame {
     show_slider: bool, 
     bet_button_clicked: bool,
     last_raiser_index: Option<usize>,
-    //game_over: bool, I'll maybe use this for GUI purpose
+    game_over: bool,
+    game_over_message: Option<String>
 }
 
 // Helper function to convert backend Card to image key
@@ -122,8 +124,12 @@ fn load_all_cards(context: &mut Context) -> HashMap<String, Image> {
 impl MyGame {
     pub fn new(context: &mut Context) -> MyGame {
         let card_images = load_all_cards(context);
-        let chip_image = Image::from_path(context, "/casino-poker-chip-png.webp")
-            .expect("Chip image not found");
+        let chip_images = vec![
+            Image::from_path(context, "/pot1.png").unwrap(), // 0–99
+            Image::from_path(context, "/pot2.png").unwrap(), // 100–499
+            Image::from_path(context, "/pot3.png").unwrap(), // 500–749
+            Image::from_path(context, "/pot4.png").unwrap(), // 750+
+        ];
 
         let mut backend_game = Game::new(2, 1000); // This needs to be changed when network is integrated
 
@@ -135,13 +141,15 @@ impl MyGame {
                 name: "Joel".to_string(),
                 chips: 1000,
                 backend_player: BackendPlayer::new(1000),
-                position: Vec2::new(100.0, 500.0)
+                position: Vec2::new(100.0, 500.0),
+                last_action: None,
             },
             FrontendPlayer {
                 name: "Gustav".to_string(),
                 chips: 1000,
                 backend_player: BackendPlayer::new(1000),
-                position: Vec2::new(700.0, 500.0)
+                position: Vec2::new(700.0, 500.0),
+                last_action: None,
             },
         ];
 
@@ -161,7 +169,7 @@ impl MyGame {
         MyGame {
             card_images,
             players: frontend_players,
-            chip_image,
+            chip_images,
             game_state: GameState::Preflop,
             backend_game,
             elapsed_time: 0.0,
@@ -176,7 +184,8 @@ impl MyGame {
             show_slider: false,
             bet_button_clicked: false,
             last_raiser_index: None,
-            //game_over: false,
+            game_over: false,
+            game_over_message: None,
         }
     }
 
@@ -186,19 +195,7 @@ impl MyGame {
             player.chips = self.backend_game.players[i].chips.chips; // Sync players with chips
         }
     }
-    // Was a function that was used, not anymore. But might be of use
-    /*
-    fn place_bet(&mut self, bet_amount: u32) {
-        if let Err(error) = self.backend_game.bet(self.current_player_index, bet_amount) {
-            println!("Error placing bet: {}", error);
-        }
-        else {
-            // Sync state after placing a bet
-            self.sync_pot_and_chips();
-        }
-    }
-    */
-
+    
     // Reset the game when a player has won or pressed R (single player verison)
     fn reset_game(&mut self) {
         self.backend_game = Game::new(2, 1000);
@@ -207,6 +204,9 @@ impl MyGame {
             if let Ok(cards) = self.backend_game.deck.draw(2) {
                 self.backend_game.players[player].hand.cards = cards;
                 self.last_raiser_index = None;
+                self.game_over = false;
+                self.game_over_message = None;
+                self.sync_pot_and_chips();
             }
         }
     
@@ -249,17 +249,6 @@ impl MyGame {
         } 
         index
     }
-    // Could be a great helper function for GameStates
-    /* 
-    fn advance_phase(&mut self, next_phase: GameState, draw_count: usize) {
-        if let Ok(new_cards) = self.backend_game.deck.draw(draw_count) {
-            self.backend_game.board.extend(new_cards);
-        }
-        self.reset_actions();
-        self.backend_game.reset_round();
-        self.game_state = next_phase;
-    }
-    */
 
     fn determine_winner(&self) -> usize {
         self.backend_game.best_hand()
@@ -355,6 +344,7 @@ impl EventHandler for MyGame {
                         }
                         self.reset_actions();
                         self.backend_game.reset_round();
+                        self.players[self.current_player_index].last_action = Some(self.player_action.clone());
                         self.game_state = GameState::Turn;
                     
                 },
@@ -366,6 +356,7 @@ impl EventHandler for MyGame {
                         }
                         self.reset_actions();
                         self.backend_game.reset_round();
+                        self.players[self.current_player_index].last_action = Some(self.player_action.clone());
                         self.game_state = GameState::River;
                     
                 },
@@ -388,12 +379,17 @@ impl EventHandler for MyGame {
                         .filter(|predicate| predicate.chips > 0)
                         .collect();
                         if alive_players.len() <= 1 {
-                            println!("Game over! Winner is {}", alive_players.first().unwrap().name);
-                            self.reset_game();
+                            if let Some(winner) = alive_players.first() {
+                                self.game_over_message = Some(format!("Game Over! {} wins!", winner.name));
+                            } else {
+                                self.game_over_message = Some("Game Over! No chips left.".to_string());
+                            }
+                            self.game_over = true;
                         }
                         // Otherwise restart round and keep going
                         else {
                             self.backend_game.reset_round();
+                            self.sync_pot_and_chips();
                             self.reset_actions();
                             self.game_state = GameState::Preflop;
                             self.winner_index = None;
@@ -499,7 +495,7 @@ impl EventHandler for MyGame {
             let card_key = card_to_image_key(card);
             if let Some(card_image) = self.card_images.get(&card_key) {
                 canvas.draw(card_image, graphics::DrawParam::default()
-                .dest(Vec2::new(250.0 + i as f32 * 110.0, 300.0))
+                .dest(Vec2::new(200.0 + i as f32 * 110.0, 200.0))
                 .scale(Vec2::new(0.14, 0.14)),
                 );
             }
@@ -538,14 +534,14 @@ impl EventHandler for MyGame {
             let name_text = graphics::Text::new(display_text);
             canvas.draw(&name_text, DrawParam::default().dest(player.position));
         
-            // Make the cards yellow to represent the winner even more
+            // Draw players hand (singleplayer version)
             for (j, card) in self.backend_game.players[i].hand.cards.iter().enumerate() {
                 let card_key = card_to_image_key(card);
                 if let Some(card_image) = self.card_images.get(&card_key) {
                     let mut parameter = DrawParam::default()
                         .dest(player.position + Vec2::new(j as f32 * 40.0, 30.0))
                         .scale(Vec2::new(0.28, 0.28));
-        
+                    // Make the cards yellow to represent the winner even more
                     if is_winner {
                         parameter = parameter.color(Color::from_rgb(255, 255, 150));
                     }
@@ -555,16 +551,43 @@ impl EventHandler for MyGame {
             }
         }
 
-        // Draw pot and chips
+        /*
+        // Draw players hand (multiplayer version)
+        for (i, player) in self.players.iter().enumerate() {
+            let is_you = i == self.local_player_index; // Defined later in backend/network
+            let is_showdown = self.game_state = GameState::Showdown;
+
+            for (j, card) in player.backend_player.hand.cards.iter().enumerate() {
+                let card_image = if is_you || is_showdown {
+                    &self.card_images[card.index()] // the card.index() method should give each card a unique ID for image lookup
+                }
+                else {
+                    &self.card_back_image // an image of the back of a card
+                };
+                let position = player.position + Vec2::new((j * 40) as f32, 0.0);
+                canvas.draw(card_image, DrawParam::default().dest(position));
+            }
+        }
+        */
+
+        // Set pot ranges for the different pot-pngs
+        let chip_index = match self.pot {
+            0..= 99 => 0,
+            100..= 499 => 1,
+            500..= 749 => 2,
+            _ => 3,
+        };
+        let chip_image = &self.chip_images[chip_index];
+        // Draw pot
         canvas.draw(
-            &self.chip_image,
+            chip_image,
             DrawParam::default()
-            .dest(Vec2::new(200.0, 400.0))
+            .dest(Vec2::new(300.0, 300.0))
             .scale(Vec2::new(0.3, 0.3)));
         
         let pot_text = Text::new(format!("Pot: {} chips", self.pot));
         canvas.draw(&pot_text, DrawParam::default()
-            .dest(Vec2::new(200.0, 370.0))
+            .dest(Vec2::new(100.0, 370.0))
     );
 
         // Draw action buttons
@@ -572,7 +595,7 @@ impl EventHandler for MyGame {
         
         for (i, label) in button_labbels.iter().enumerate() {
             let x = 50.0 + i as f32 * 130.0;
-            let y = 150.0;
+            let y = 100.0;
             let rect = Rect::new(x, y, 120.0, 50.0);
             let button = graphics::Mesh::new_rectangle(
                 context,
@@ -592,7 +615,7 @@ impl EventHandler for MyGame {
 
         // Slider messurments
         let slider_x = 300.0;
-        let slider_y = 100.0;
+        let slider_y = 50.0;
         let slider_width = 300.0;
         let knob_radius = 10.0;
 
@@ -630,6 +653,27 @@ impl EventHandler for MyGame {
         let value_text = Text::new(format!("Bet: {} chips", self.slider_value));
         canvas.draw(&value_text, DrawParam::default().dest(Vec2::new(slider_x, slider_y + 20.0)));
         }
+
+        // Draw textbox with chosen playeraction 
+        for player in &self.players {
+            if let Some(action) = &player.last_action {
+                let text = Text::new(format!("{:?}", action));
+                canvas.draw(
+                    &text, 
+                    DrawParam::default()
+                    .dest(player.position + Vec2::new(0.0, 150.0))
+                    .color(Color::WHITE)
+                );
+            }
+        }
+
+        // Draw game over text
+        if let Some(ref message) = self.game_over_message {
+            let fragment = TextFragment::new(message.as_str()).scale(36.0);
+            let text = Text::new(fragment);
+            let screen_center = Vec2::new(screen_width / 2.0, screen_height / 2.0);
+            canvas.draw(&text, DrawParam::default().dest(screen_center));
+        }
         canvas.finish(context)?;
         Ok(())
     }
@@ -646,10 +690,10 @@ impl EventHandler for MyGame {
                 self.slider_dragging = false;
 
                 let buttons = [
-                    (PlayerActions::Bet, Rect::new(50.0, 150.0, 120.0, 50.0)),
-                    (PlayerActions::Check, Rect::new(180.0, 150.0, 120.0, 50.0)),
-                    (PlayerActions::Call, Rect::new(310.0, 150.0, 120.0, 50.0)),
-                    (PlayerActions::Fold, Rect::new(440.0, 150.0, 120.0, 50.0)),
+                    (PlayerActions::Bet, Rect::new(50.0, 100.0, 120.0, 50.0)),
+                    (PlayerActions::Check, Rect::new(180.0, 100.0, 120.0, 50.0)),
+                    (PlayerActions::Call, Rect::new(310.0, 100.0, 120.0, 50.0)),
+                    (PlayerActions::Fold, Rect::new(440.0, 100.0, 120.0, 50.0)),
                 ];
 
                 for (action, rect) in buttons.iter() {
@@ -678,7 +722,7 @@ impl EventHandler for MyGame {
 
                 if self.show_slider {
                     let slider_x = 300.0;
-                    let slider_y = 100.0;
+                    let slider_y = 50.0;
                     let slider_width = 300.0;
                     let knob_radius = 10.0;
         
