@@ -50,6 +50,7 @@ impl Rank {
 // Texas Hold em
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
 pub enum GamePhase {
+    Waiting,
     Preflop, 
     Flop,
     Turn, 
@@ -78,7 +79,7 @@ pub enum ClientMessage {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerMessage {
-    Welcome(String),
+    Welcome(String, usize),
     GameState(GameStateInfo),
     Error(String),
 }

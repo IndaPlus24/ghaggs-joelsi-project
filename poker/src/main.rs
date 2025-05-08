@@ -64,6 +64,7 @@ struct MyGame {
     last_raiser_index: Option<usize>,
     to_server_tx: Sender<ClientMessage>,
     to_game_rx: Receiver<ServerMessage>,
+    player_id: usize,
     //game_over: bool, I'll maybe use this for GUI purpose
 }
 
@@ -122,42 +123,30 @@ impl MyGame {
         let chip_image = Image::from_path(context, "/casino-poker-chip-png.webp")
             .expect("Chip image not found");
 
-        let mut backend_game = Game::new(2, 1000); // This needs to be changed when network is integrated
+        let backend_game = Game::new(0, 0);
+        // vec![
+        //    FrontendPlayer {
+        //        name: "Joel".to_string(),
+        //        chips: 1000,
+        //        backend_player: BackendPlayer::new(1000),
+        //        position: Vec2::new(100.0, 500.0)
+        //    },
+        //    FrontendPlayer {
+        //        name: "Gustav".to_string(),
+        //        chips: 1000,
+        //        backend_player: BackendPlayer::new(1000),
+        //        position: Vec2::new(700.0, 500.0)
+        //    },
+        // ];
 
-        backend_game.deck.shuffle();
 
-        // This is also gonna get changed when network is integrated
-        let mut frontend_players = vec![
-            FrontendPlayer {
-                name: "Joel".to_string(),
-                chips: 1000,
-                backend_player: BackendPlayer::new(1000),
-                position: Vec2::new(100.0, 500.0)
-            },
-            FrontendPlayer {
-                name: "Gustav".to_string(),
-                chips: 1000,
-                backend_player: BackendPlayer::new(1000),
-                position: Vec2::new(700.0, 500.0)
-            },
-        ];
+        // let slider_max = frontend_players.get(0).map(|p| p.chips).unwrap_or(0);
 
-        // Deal cards to players
-        for player in 0..backend_game.players.len() {
-            if let Ok(cards) = backend_game.deck.draw(2) {
-                backend_game.players[player].hand.cards = cards;
-            }
-        }
-
-        for (i, player) in frontend_players.iter_mut().enumerate() {
-            player.backend_player = backend_game.players[i].clone();
-        }
-
-        let slider_max = frontend_players[0].chips;
+        let _ = to_server_tx.try_send(ClientMessage::Join("Player0".to_string()));
 
         MyGame {
             card_images,
-            players: frontend_players,
+            players: vec![],
             chip_image,
             game_state: GameState::Preflop,
             backend_game,
@@ -168,35 +157,17 @@ impl MyGame {
             player_actions_done: vec![false; 2],
             current_player_index: 0,
             slider_value: 0, 
-            slider_max,
+            slider_max: 0,
             slider_dragging: false,
             show_slider: false,
             bet_button_clicked: false,
             last_raiser_index: None,
-            to_server_tx: to_server_tx,
+            to_server_tx: to_server_tx.clone(),
             to_game_rx: to_game_rx,
+            player_id: 0,
             //game_over: false,
         }
     }
-
-    fn sync_pot_and_chips(&mut self) {
-        self.pot = self.backend_game.pot.total; // Sync pot with backend
-        for (i, player) in self.players.iter_mut().enumerate() {
-            player.chips = self.backend_game.players[i].chips.chips; // Sync players with chips
-        }
-    }
-    // Was a function that was used, not anymore. But might be of use
-    /*
-    fn place_bet(&mut self, bet_amount: u32) {
-        if let Err(error) = self.backend_game.bet(self.current_player_index, bet_amount) {
-            println!("Error placing bet: {}", error);
-        }
-        else {
-            // Sync state after placing a bet
-            self.sync_pot_and_chips();
-        }
-    }
-    */
 
     // Reset the game when a player has won or pressed R (single player verison)
     fn reset_game(&mut self) {
@@ -218,7 +189,6 @@ impl MyGame {
         self.game_state = GameState::Preflop;
         self.elapsed_time = 0.0;
         self.winner_index = None;
-        self.pot = 0;
     }
 
     // Reset actions to be able to do all actions in the next game-phase
@@ -236,16 +206,21 @@ impl MyGame {
         .position(|predicate| !predicate.backend_player.is_folded)
         .unwrap_or(0);
 
-        self.slider_max = self.players[self.current_player_index].chips;
+        self.slider_max = self.players.get(self.current_player_index).map(|p| p.chips).unwrap_or(0);
         self.slider_value = 0;
     }
 
     // Track players who have folded to see what player's turn is next
     fn find_next_active_player(&self, from: usize) -> usize{
         let mut index = from;
-        while self.players[index].chips == 0 || self.backend_game.players[index].is_folded {
+        if self.players.is_empty() || self.backend_game.players.is_empty() {
+            return 0;
+        }
+        while self.players.get(index).map_or(true, |p| p.chips == 0)
+            || self.backend_game.players.get(index).map_or(true, |p| p.is_folded)
+        {
             index = (index + 1) % self.players.len();
-        } 
+        }
         index
     }
     // Could be a great helper function for GameStates
@@ -259,10 +234,6 @@ impl MyGame {
         self.game_state = next_phase;
     }
     */
-
-    fn determine_winner(&self) -> usize {
-        self.backend_game.best_hand()
-    }
 }
 
 
@@ -273,13 +244,58 @@ impl EventHandler for MyGame {
 
         // RECEIVE FROM SERVER
         while let Ok(msg) = self.to_game_rx.try_recv() {
+            println!("{:?}", msg);
             match msg {
-                ServerMessage::Welcome(name) => println!("Server says: {}", name),
-                ServerMessage::GameState(state) => println!("Gamestate is now: {:?}", state),
+                ServerMessage::Welcome(name, id) => {
+                    println!("Server says: {}", name);
+                    self.player_id = id;
+                },
+                ServerMessage::GameState(state) => {
+                    // Update pot
+                    self.pot = state.pot;
+                    self.game_state = match state.phase.as_str() {
+                        "Preflop" => GameState::Preflop,
+                        "Flop" => GameState::Flop,
+                        "Turn" => GameState::Turn,
+                        "River" => GameState::River,
+                        "Showdown" => GameState::Showdown,
+                        _ => GameState::Preflop,
+                    };
+                
+                    // Update board
+                    self.backend_game.board = state.board.clone();
+                
+                    // Sync players
+                    self.players.clear();
+                    for p in &state.players {
+                        self.players.push(FrontendPlayer {
+                            name: p.name.clone(),
+                            chips: p.chips,
+                            position: if p.id == 0 {
+                                Vec2::new(100.0, 500.0)
+                            } else {
+                                Vec2::new(700.0, 500.0)
+                            },
+                            backend_player: {
+                                let mut bp = BackendPlayer::new(p.chips);
+                                bp.hand.cards = if let Some(cards) = p.hand.clone() {
+                                    cards.to_vec()
+                                } else {
+                                    vec![]
+                                };
+                                bp.is_folded = p.is_folded;
+                                bp
+                            },
+                        });
+                    }
+                },
                 ServerMessage::Error(err) => println!("Server error: {}", err),
             }
         }
         //////////////////////////////////////////////////////////////////////////////////////////
+        if self.players.is_empty() {
+            return Ok(());
+        }
 
         // Slider for betting
         if self.slider_dragging && self.slider_max > 0 {
@@ -293,130 +309,41 @@ impl EventHandler for MyGame {
             match self.player_action {
                 PlayerActions::Bet => {
                     let bet_amount = self.slider_value;
-                    if self.backend_game.bet(self.current_player_index, bet_amount).is_ok() {
-                        self.last_raiser_index = Some(self.current_player_index);
-                        let _ = self.to_server_tx.try_send(ClientMessage::Bet(bet_amount));
-                    }
-                    else {
-                        println!("Error with betting");
-                    }
+                    let _ = self.to_server_tx.send(ClientMessage::Bet(bet_amount));
+                    self.last_raiser_index = Some(self.current_player_index);
                 }
-            PlayerActions::Check => {
-                    if let Err(error) = self.backend_game.check(self.current_player_index) {
-                        println!("Check error: {}", error);
-                        let _ = self.to_server_tx.try_send(ClientMessage::Check);
-                    }
+                PlayerActions::Check => {
+                    let _ = self.to_server_tx.send(ClientMessage::Check);
                 }
-            PlayerActions::Call => {
-                if let Err(error) = self.backend_game.call(self.current_player_index) {
-                    println!("Call error: {}", error);
+                PlayerActions::Call => {
+                    let _ = self.to_server_tx.send(ClientMessage::Call);
                 }
+                PlayerActions::Fold => {
+                    let _ = self.to_server_tx.send(ClientMessage::Fold);
+                }
+                PlayerActions::None => return Ok(()),
             }
-            PlayerActions::Fold => {
-                self.backend_game.fold(self.current_player_index);
-                let _ = self.to_server_tx.try_send(ClientMessage::Fold);
-            }
-            PlayerActions::None => return Ok(()),
-        }
 
         // When an action is done:
-        self.sync_pot_and_chips();
         self.player_actions_done[self.current_player_index] = true;
         self.player_action = PlayerActions::None;
 
         // Advance to next player's turn
+        if self.players.is_empty() {
+            return Ok(());
+        }
         let mut next_index = (self.current_player_index + 1) % self.players.len();
         while self.backend_game.players[next_index].is_folded {
             next_index = (next_index + 1) % self.players.len();
         }
         self.current_player_index = next_index;
 
-        self.slider_max = self.players[self.current_player_index].chips;
+        self.slider_max = self.players.get(self.current_player_index).map(|p| p.chips).unwrap_or(0);
         self.slider_value = self.slider_value.min(self.slider_max);
     }
 
-        // Check if round is ready to advance
-        let all_acted = self.player_actions_done
-            .iter()
-            .enumerate()
-            .all(|(i, acted)| self.backend_game.players[i].is_folded || *acted);
+        // Advancement now handled by server
 
-        let everyone_matched = self.backend_game.non_folded_players_match_bet();
-
-        // Advance to the next phase. Here's also where all the gamephases are handled
-        if all_acted && everyone_matched {
-            self.elapsed_time += delta;
-            
-            match self.game_state {
-                // First phase
-                GameState::Preflop => {
-                        // Deal flop (3 cards)
-                        if let Ok(flop_cards) = self.backend_game.deck.draw(3) {
-                            self.backend_game.board.extend(flop_cards);
-                        }
-                        self.reset_actions();
-                        self.backend_game.reset_round();
-                        self.game_state = GameState::Flop;
-                    
-                },
-                // Second phase
-                GameState::Flop => {
-                        // Deal turn (1 card)
-                        if let Ok(turn_card) = self.backend_game.deck.draw(1) {
-                            self.backend_game.board.extend(turn_card);
-                        }
-                        self.reset_actions();
-                        self.backend_game.reset_round();
-                        self.game_state = GameState::Turn;
-                    
-                },
-                // Third phase
-                GameState::Turn => {
-                        // Deal river (1 card)
-                        if let Ok(river_card) = self.backend_game.deck.draw(1) {
-                            self.backend_game.board.extend(river_card);
-                        }
-                        self.reset_actions();
-                        self.backend_game.reset_round();
-                        self.game_state = GameState::River;
-                    
-                },
-                // Fourth phase
-                GameState::River => {
-                        self.game_state = GameState::Showdown;                    
-                },
-                // Fifth and last phase
-                GameState::Showdown => {
-                    // Set round winner once on first showdown frame
-                    if self.winner_index.is_none() {
-                        self.winner_index = Some(self.determine_winner());
-                        self.backend_game.award_pot_to_winner();
-                        self.elapsed_time = 0.0; // Reset timer when entering showdown
-                    }
-                    // Check how many are alive and if someone has won the game
-                    if self.elapsed_time > 3.0 {
-                        let alive_players: Vec<_> = self.players
-                        .iter()
-                        .filter(|predicate| predicate.chips > 0)
-                        .collect();
-                        if alive_players.len() <= 1 {
-                            println!("Game over! Winner is {}", alive_players.first().unwrap().name);
-                            self.reset_game();
-                        }
-                        // Otherwise restart round and keep going
-                        else {
-                            self.backend_game.reset_round();
-                            self.reset_actions();
-                            self.game_state = GameState::Preflop;
-                            self.winner_index = None;
-                            self.current_player_index = self.find_next_active_player(0);
-                            self.slider_max = self.players[self.current_player_index].chips;
-                            self.slider_value = 0;
-                        }
-                    }
-                }
-                }
-            }
         Ok(())
     }
 
@@ -519,7 +446,7 @@ impl EventHandler for MyGame {
         
         // Highlight when a player wins
         let winner_index = if self.game_state == GameState::Showdown {
-            Some(self.determine_winner())
+            self.winner_index
         } else {
             None
         };
@@ -551,18 +478,20 @@ impl EventHandler for MyGame {
             canvas.draw(&name_text, DrawParam::default().dest(player.position));
         
             // Make the cards yellow to represent the winner even more
-            for (j, card) in self.backend_game.players[i].hand.cards.iter().enumerate() {
-                let card_key = card_to_image_key(card);
-                if let Some(card_image) = self.card_images.get(&card_key) {
-                    let mut parameter = DrawParam::default()
-                        .dest(player.position + Vec2::new(j as f32 * 40.0, 30.0))
-                        .scale(Vec2::new(0.28, 0.28));
-        
-                    if is_winner {
-                        parameter = parameter.color(Color::from_rgb(255, 255, 150));
+            if let Some(backend_player) = self.backend_game.players.get(i) {
+                for (j, card) in self.backend_game.players[i].hand.cards.iter().enumerate() {
+                    let card_key = card_to_image_key(card);
+                    if let Some(card_image) = self.card_images.get(&card_key) {
+                        let mut parameter = DrawParam::default()
+                            .dest(player.position + Vec2::new(j as f32 * 40.0, 30.0))
+                            .scale(Vec2::new(0.28, 0.28));
+            
+                        if is_winner {
+                            parameter = parameter.color(Color::from_rgb(255, 255, 150));
+                        }
+            
+                        canvas.draw(card_image, parameter);
                     }
-        
-                    canvas.draw(card_image, parameter);
                 }
             }
         }
@@ -609,7 +538,7 @@ impl EventHandler for MyGame {
         let knob_radius = 10.0;
 
         // Make boundary depending on how many chips a player has
-        self.slider_max = self.players[self.current_player_index].chips;
+        self.slider_max = self.players.get(self.current_player_index).map(|p| p.chips).unwrap_or(0);
         if self.slider_value > self.slider_max {
             self.slider_value = self.slider_max;
             }
@@ -729,7 +658,7 @@ impl EventHandler for MyGame {
             _repeated: bool,
         ) -> GameResult {
         if let Some(KeyCode::R) = input.keycode {
-            self.reset_game();
+            // self.reset_game();
         }
         Ok(())
     }

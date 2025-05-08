@@ -25,6 +25,8 @@ pub struct Game {
     pub t7: Arc<TableSeven>,
     pub pot: Pot,
     pub phase: GamePhase,
+    pub winner: Option<usize>,
+    pub current_turn_index: usize,
 }
 
 impl Game {
@@ -36,7 +38,7 @@ impl Game {
 
         let pot = Pot::new(players); // Initialise a pot with number of players
 
-        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot, phase: GamePhase::Preflop, }
+        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot, phase: GamePhase::Waiting, winner: None, current_turn_index: 0 }
     }
 
     // Handling playeraction: betting
@@ -148,6 +150,9 @@ impl Game {
 
     pub fn advance_phase(&mut self) {
         match self.phase {
+            GamePhase::Waiting => {
+                // Do nothing
+            }
             GamePhase::Preflop => {
                 if let Ok(flop) = self.deck.draw(3) {
                     self.board.extend(flop);
@@ -187,4 +192,31 @@ impl Game {
             }
         }
     }
+
+    pub fn start_game(&mut self) {
+        use crate::structs::enums::GamePhase;
+    
+        self.deck.shuffle();
+        self.board.clear();
+        self.pot.total = 0;
+        self.pot.current_bet = 0;
+        self.pot.player_bets = vec![0; self.players.len()];
+        self.phase = GamePhase::Preflop;
+        self.winner = None;
+    
+        for player in self.players.iter_mut() {
+            player.is_folded = false;
+            player.hand.cards.clear();
+        }
+    
+        // Deal 2 hole cards to each player
+        for player in self.players.iter_mut() {
+            if let Ok(cards) = self.deck.draw(2) {
+                player.hand.cards = cards;
+            }
+        }
+    
+        self.current_turn_index = 0; // Or however you want to pick the starting player
+    }
+    
 }
