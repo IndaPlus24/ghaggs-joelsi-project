@@ -1,9 +1,12 @@
 # projekt-Poker
 
 # To Run
-https://github.com/IndaPlus24/ghaggs-joelsi-project.git
-cd ghaggs-joelsi-project
-cargo run
+
+    git clone https://github.com/IndaPlus24/ghaggs-joelsi-project.git
+
+    cd ghaggs-joelsi-project
+
+    cargo run
 
 # Project root
 docs - holds work_flowchart in text and a pdf
@@ -18,4 +21,5 @@ The work_flowchart was used as a small sketch for the start to help us set up go
 
 # Author
 Gustav Häggström (ghaggs)
+
 Joel Simonsson (joelsi)
