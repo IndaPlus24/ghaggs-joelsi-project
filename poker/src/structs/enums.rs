@@ -1,6 +1,6 @@
 use strum_macros::EnumIter;
 use serde::{Serialize, Deserialize};
-use super::card::Card;
+use super::{card::Card, playerchips::PlayerChips};
 
 #[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Suit {
@@ -90,7 +90,7 @@ pub struct GameStateInfo {
     pub players: Vec<PlayerPublicInfo>,
     pub board: Vec<Card>,
     pub current_turn: usize,
-    pub phase: String,
+    pub phase: GamePhase,
     pub winner: Option<usize>,
 }
 
@@ -98,7 +98,7 @@ pub struct GameStateInfo {
 pub struct PlayerPublicInfo {
     pub id: usize,
     pub name: String,
-    pub chips: u32,
+    pub chips: PlayerChips,
     pub is_folded: bool,
     pub hand: Option<[Card; 2]>, // only shown to the player themselves or on showdown
 }

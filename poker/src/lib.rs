@@ -4,14 +4,16 @@ use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
 
 use std::sync::Arc;
 
-use poker_eval::eval::five::{build_tables as build_tables_five, get_rank_five, TableFive};
-use poker_eval::eval::seven::{build_tables as build_tables_seven, get_rank as get_rank_seven, TableSeven};
+use poker_eval::eval::five::{build_tables as build_tables_five, TableFive};
+use poker_eval::eval::seven::{build_tables as build_tables_seven, TableSeven};
 
-use structs::deck::Deck;
-use structs::card::Card;
-use structs::player::{self, Player};
-use structs::pot::Pot;
-use structs::enums::GamePhase;
+use structs::{
+    deck::Deck,
+    card::Card,
+    player::Player,
+    pot::Pot,
+    enums::GamePhase,
+};
 
 ///// TODO: FUNKTION SOM JÄMFÖR ALLAS HÄNDER I GAME-STRUCTEN!!!
 
@@ -27,6 +29,7 @@ pub struct Game {
     pub phase: GamePhase,
     pub winner: Option<usize>,
     pub current_turn_index: usize,
+    pub player_has_acted: Vec<bool>,
 }
 
 impl Game {
@@ -38,7 +41,7 @@ impl Game {
 
         let pot = Pot::new(players); // Initialise a pot with number of players
 
-        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot, phase: GamePhase::Waiting, winner: None, current_turn_index: 0 }
+        Game { deck: Deck::new(), players: player_list, board: Vec::new(), t5: build_tables_five(false), t7: build_tables_seven(false), pot, phase: GamePhase::Waiting, winner: None, current_turn_index: 0, player_has_acted: vec![false; players] }
     }
 
     // Handling playeraction: betting
@@ -59,6 +62,9 @@ impl Game {
         // Deduct the amount of chips from the betted player and add it to the pot
         player.chips.deduct(amount);
         self.pot.add_constribution(player_index, amount);
+        self.pot.current_bet = amount;
+        self.player_has_acted = vec![false; self.players.len()];
+        self.player_has_acted[player_index] = true;
 
         Ok(())
     }
@@ -149,6 +155,8 @@ impl Game {
     }
 
     pub fn advance_phase(&mut self) {
+        self.player_has_acted = vec![false; self.players.len()];
+
         match self.phase {
             GamePhase::Waiting => {
                 // Do nothing
@@ -175,12 +183,11 @@ impl Game {
                 self.phase = GamePhase::Showdown;
             }
             GamePhase::Showdown => {
-                let winner = self.best_hand();
                 self.award_pot_to_winner();
                 self.reset_round();
                 self.board.clear();
                 self.phase = GamePhase::Preflop;
-                // Optionally re-deal hands here
+
                 for player in &mut self.players {
                     player.is_folded = false;
                 }
@@ -194,8 +201,7 @@ impl Game {
     }
 
     pub fn start_game(&mut self) {
-        use crate::structs::enums::GamePhase;
-    
+        self.player_has_acted = vec![false; self.players.len()];
         self.deck.shuffle();
         self.board.clear();
         self.pot.total = 0;
@@ -209,14 +215,24 @@ impl Game {
             player.hand.cards.clear();
         }
     
-        // Deal 2 hole cards to each player
         for player in self.players.iter_mut() {
             if let Ok(cards) = self.deck.draw(2) {
                 player.hand.cards = cards;
             }
         }
     
-        self.current_turn_index = 0; // Or however you want to pick the starting player
+        self.current_turn_index = 0;
     }
     
+    pub fn mark_acted(&mut self, player_index: usize) {
+        self.player_has_acted[player_index] = true;
+    }
+
+    pub fn all_acted(&self) -> bool {
+        self.players
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !p.is_folded)
+            .all(|(i, _)| self.player_has_acted[i])
+    }
 }

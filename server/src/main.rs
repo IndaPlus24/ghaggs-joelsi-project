@@ -1,9 +1,15 @@
-use std::{collections::HashMap, net::SocketAddr, sync::{Arc, Mutex}};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 
 use futures_util::{SinkExt, StreamExt};
 use poker::Game;
-use poker::structs::enums::{ClientMessage, ServerMessage, GameStateInfo, PlayerPublicInfo, GamePhase};
-use serde::{Deserialize, Serialize};
+use poker::structs::enums::{
+    ClientMessage, GamePhase, GameStateInfo, PlayerPublicInfo, ServerMessage,
+};
+use poker::structs::pot::Pot;
 use tokio::{net::TcpListener, sync::broadcast};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
@@ -22,25 +28,12 @@ async fn main() {
     let game = Arc::new(Mutex::new(Game::new(0, 1000)));
     let (broadcast_tx, _) = broadcast::channel::<ServerMessage>(32);
     let clients = Arc::new(Mutex::new(HashMap::new()));
-
-    let game_for_broadcast = Arc::clone(&game);
-    let tx_clone = broadcast_tx.clone();
-
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let _ = tx_clone.send(ServerMessage::Error("Just testing".to_string()));
-            let g = game_for_broadcast.lock().unwrap();
-            for (i, _) in g.players.iter().enumerate() {
-                let _ = tx_clone.send(ServerMessage::GameState(build_state(&g, i, None)));
-            }
-        }
-    });
-
     let mut player_counter = 0;
 
     while let Ok((stream, addr)) = listener.accept().await {
         let ws_stream = accept_async(stream).await.unwrap();
+
+        // DEBUG
         println!("Client connected from: {}", addr);
 
         let game = Arc::clone(&game);
@@ -58,17 +51,26 @@ async fn main() {
             {
                 let mut g = game.lock().unwrap();
                 g.players.push(poker::structs::player::Player::new(1000));
+                g.player_has_acted.push(false);
+                g.pot = Pot::new(g.players.len());
             }
 
-            clients.lock().unwrap().insert(addr, PlayerConnection {
-                id: player_id,
-                name: player_name.clone(),
+            clients.lock().unwrap().insert(
                 addr,
-            });
+                PlayerConnection {
+                    id: player_id,
+                    name: player_name.clone(),
+                    addr,
+                },
+            );
 
-            let _ = write.send(Message::Text(
-                serde_json::to_string(&ServerMessage::Welcome(player_name.clone(), player_id)).unwrap().into()
-            )).await;
+            let _ = write
+                .send(Message::Text(
+                    serde_json::to_string(&ServerMessage::Welcome(player_name.clone(), player_id))
+                        .unwrap()
+                        .into(),
+                ))
+                .await;
 
             loop {
                 tokio::select! {
@@ -78,50 +80,131 @@ async fn main() {
                                 println!("{} sent: {:?}", player_name, client_msg);
 
                                 let mut g = game.lock().unwrap();
-                                match client_msg {
+                                let action_approved = match client_msg {
                                     ClientMessage::Join(name) => {
                                         player_name = name.clone();
                                         if player_id >= g.players.len() {
-                                            eprintln!("Invalid player_id: {}, skipping Join", player_id);
+                                            println!("Invalid player_id: {}, skipping Join", player_id);
                                             return;
                                         }
-                                
+
                                         g.players[player_id].name = name.clone();
-                                        println!("{} has joined.", name);
-                                
-                                        if g.players.len() >= 1 && g.phase == GamePhase::Waiting {
+                                        println!("{} has joined with played id: {}", name, player_id);
+
+                                        if g.players.len() >= 2 && g.phase == GamePhase::Waiting {
                                             g.start_game();
                                             println!("Game started!");
-                                            let _ = tx.send(ServerMessage::GameState(build_state(&g, player_id, None)));
                                         }
+                                        true
                                     },
                                     ClientMessage::Bet(amount) => {
-                                        let _ = g.bet(player_id, amount);
+                                        match g.bet(player_id, amount){
+                                            Ok(()) => {
+                                                g.mark_acted(player_id);
+                                                println!("Player id: {} raised by {}", player_id, amount);
+                                                true
+                                            }
+                                            Err(e) => {
+                                                let _ = tx.send(ServerMessage::Error(e.to_string()));
+                                                false
+                                            }
+                                        }
                                     },
                                     ClientMessage::Fold => {
-                                        g.fold(player_id);
+                                        let _ = g.fold(player_id);
+                                        g.mark_acted(player_id);
+                                        println!("Player id: {} folded", player_id);
+                                        true
                                     },
                                     ClientMessage::Check => {
-                                        let _ = g.check(player_id);
+                                        match g.check(player_id) {
+                                            Ok(()) => {
+                                                g.mark_acted(player_id);
+                                                println!("Player id: {} checked", player_id);
+                                                true
+                                            }
+                                            Err(e) => {
+                                            let _ = tx.send(ServerMessage::Error(e.to_string()));
+                                            false
+                                            }
+                                        }
                                     },
                                     ClientMessage::Call => {
-                                        let _ = g.call(player_id);
+                                        match g.call(player_id) {
+                                            Ok(()) => {
+                                                g.mark_acted(player_id);
+                                                println!("Player id: {} called the raise", player_id);
+                                                true
+                                            }
+                                            Err(e) => {
+                                                let _ = tx.send(ServerMessage::Error(e.to_string()));
+                                                false
+                                            }
+                                        }
                                     },
+                                };
+
+                                if !action_approved {
+                                    continue;
                                 }
 
-                                // Check for phase progression
-                                let all_acted = true; // Replace with real check
+                                let alive: Vec<usize> = g.players
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, p)| !p.is_folded)
+                                .map(|(i, _)| i)
+                                .collect();
+
+                            if alive.len() == 1 {
+                                let winner = alive[0];
+                                g.phase = GamePhase::Showdown;
+                                g.winner = Some(winner);
+                                let _ = tx.send(ServerMessage::GameState(build_state(&g, Some(winner))));
+                                let game_clone = game.clone();
+                                let tx_clone = tx.clone();
+                                tokio::spawn(async move {
+                                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                    let mut g = game_clone.lock().unwrap();
+                                    g.start_game();
+                                    let fresh = build_state(&g, None);
+                                    let _ = tx_clone.send(ServerMessage::GameState(fresh));
+                                });
+                                continue;
+                            }
+
+                                let n = g.players.len();
+                                let mut next = (g.current_turn_index + 1) % n;
+                                while g.players[next].is_folded {
+                                    next = (next + 1) % n;
+                                }
+                                g.current_turn_index = next;
+
+                                let all_acted = g.all_acted();
                                 let matched = g.non_folded_players_match_bet();
-                                let mut winner: Option<usize> = None;
                                 if all_acted && matched {
                                     g.advance_phase();
-                                    winner = if g.phase == GamePhase::Showdown {
-                                        Some(g.best_hand())
-                                    } else {
-                                        None
-                                    };
+                                    let winner = if g.phase == GamePhase::Showdown { Some(g.best_hand()) } else { None };
+                                    if winner != None {
+                                        println!("Player {:?} won", winner);
+                                    }
+                                    let _ = tx.send(ServerMessage::GameState(build_state(&g, winner)));
                                 }
-                                let _ = tx.send(ServerMessage::GameState(build_state(&g, player_id, winner)));
+                                else {
+                                    let _ = tx.send(ServerMessage::GameState(build_state(&g, None)));
+                                }
+
+                                if g.phase == GamePhase::Showdown {
+                                    let game_clone = game.clone();
+                                    let tx_clone = tx.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                        let mut g = game_clone.lock().unwrap();
+                                        g.start_game();
+
+                                        let fresh_state = build_state(&g, None);
+                                        let _ = tx_clone.send(ServerMessage::GameState(fresh_state));
+                                    });
+                                }
                             }
                         }
                     }
@@ -138,32 +221,30 @@ async fn main() {
     }
 }
 
-
-fn build_state(game: &Game, viewer_id: usize, winner: Option<usize>) -> GameStateInfo {
-    let players = game.players.iter().enumerate().map(|(i, p)| {
-        PlayerPublicInfo {
+fn build_state(game: &Game, winner: Option<usize>) -> GameStateInfo {
+    let players = game
+        .players
+        .iter()
+        .enumerate()
+        .map(|(i, p)| PlayerPublicInfo {
             id: i,
             name: format!("Player{}", i),
-            chips: p.chips.chips,
+            chips: p.chips.clone(),
             is_folded: p.is_folded,
-            hand: if i == viewer_id || game.phase == GamePhase::Showdown {
-                if p.hand.cards.len() == 2 {
-                    Some([p.hand.cards[0].clone(), p.hand.cards[1].clone()])
-                } else {
-                    None
-                }
+            hand: if p.hand.cards.len() == 2 {
+                Some([p.hand.cards[0].clone(), p.hand.cards[1].clone()])
             } else {
                 None
-            }
-        }
-    }).collect();
+            },
+        })
+        .collect();
 
     GameStateInfo {
         pot: game.pot.total,
         players,
         board: game.board.clone(),
-        current_turn: 0,
-        phase: format!("{:?}", game.phase),
+        current_turn: game.current_turn_index,
+        phase: game.phase,
         winner,
     }
 }
