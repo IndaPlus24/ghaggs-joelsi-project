@@ -6,13 +6,13 @@ use ggez::{
 
 use ghaggs_joelsi_project::{
     structs::{
-        card::Card, enums::{Rank, Suit}, player::{self, Player as BackendPlayer}
+        card::{self, Card}, enums::{Rank, Suit}, player::{self, Player as BackendPlayer}
     }, Game
 };
 
 
 fn main() {
-    // Make a Context.
+    // Make a Context
     let (mut context, event_loop) = ContextBuilder::new("Poker", "Gustav, Joel")
         .add_resource_path("./resources")
         .build()
@@ -39,6 +39,7 @@ enum PlayerActions {
     Check,
     Call,
     Fold,
+    AllIn,
 }
 
 // Frontend player representation
@@ -138,14 +139,14 @@ impl MyGame {
         // This is also gonna get changed when network is integrated
         let mut frontend_players = vec![
             FrontendPlayer {
-                name: "Joel".to_string(),
+                name: "Player 1".to_string(),
                 chips: 1000,
                 backend_player: BackendPlayer::new(1000),
                 position: Vec2::new(100.0, 500.0),
                 last_action: None,
             },
             FrontendPlayer {
-                name: "Gustav".to_string(),
+                name: "Player 2".to_string(),
                 chips: 1000,
                 backend_player: BackendPlayer::new(1000),
                 position: Vec2::new(700.0, 500.0),
@@ -195,6 +196,10 @@ impl MyGame {
             player.chips = self.backend_game.players[i].chips.chips; // Sync players with chips
         }
     }
+
+    fn record_last_action(&mut self, player_index: usize, action: PlayerActions) {
+        self.players[player_index].last_action = Some(action);
+    }
     
     // Reset the game when a player has won or pressed R (single player verison)
     fn reset_game(&mut self) {
@@ -225,6 +230,9 @@ impl MyGame {
     // Reset actions to be able to do all actions in the next game-phase
     fn reset_actions(&mut self) {
         self.player_actions_done = vec![false; self.players.len()];
+        for player in &mut self.players {
+            player.last_action = None;
+        }
         self.elapsed_time = 0.0;
         self.player_action = PlayerActions::None;
 
@@ -246,8 +254,52 @@ impl MyGame {
         let mut index = from;
         while self.players[index].chips == 0 || self.backend_game.players[index].is_folded {
             index = (index + 1) % self.players.len();
-        } 
+        }
         index
+    }
+
+    fn check_fold_win(&mut self) -> bool {
+        let remaining_players: Vec<_> = self.backend_game.players
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| !p.is_folded)
+            .collect();
+    
+        // If only one player remains, they are the winner
+        if remaining_players.len() == 1 {
+            let winner_index = remaining_players[0].0;
+            self.winner_index = Some(winner_index);
+            self.backend_game.award_pot_to_specific_player(winner_index);
+            self.sync_pot_and_chips();
+    
+            // Transition to Showdown phase without ending the game
+            self.game_state = GameState::Showdown;
+            
+            return true; // Indicate that the round is over
+        }
+    
+        false // No winner yet
+    }
+    
+
+    fn draw_remaining_community_cards(&mut self) {
+        let needed = match self.backend_game.board.len() {
+            0 => 5, // No cards dealt yet (preflop)
+            3 => 2, // Flop dealt (needs turn + river)
+            4 => 1, // Flop + turn dealt (needs river)
+            5 => 0, // Board already complete
+            _ => {
+                println!("Unexpected board state with {} cards", self.backend_game.board.len());
+                return;
+            }
+        };
+    
+        if needed > 0 {
+            match self.backend_game.deck.draw(needed) {
+                Ok(cards) => self.backend_game.board.extend(cards),
+                Err(e) => println!("Failed to draw remaining community cards: {}", e),
+            }
+        }
     }
 
     fn determine_winner(&self) -> usize {
@@ -274,25 +326,55 @@ impl EventHandler for MyGame {
                 PlayerActions::Bet => {
                     let bet_amount = self.slider_value;
                     if self.backend_game.bet(self.current_player_index, bet_amount).is_ok() {
+                        self.record_last_action(self.current_player_index, PlayerActions::Bet);
                         self.last_raiser_index = Some(self.current_player_index);
+
+                        for (i, player) in self.backend_game.players.iter().enumerate() {
+                            if i != self.current_player_index && !player.is_folded {
+                                self.player_actions_done[i] = false;
+                            }
+                        }
                     }
                     else {
                         println!("Error with betting");
                     }
                 }
             PlayerActions::Check => {
-                    if let Err(error) = self.backend_game.check(self.current_player_index) {
-                        println!("Check error: {}", error);
+                if self.backend_game.check(self.current_player_index).is_ok() {
+                    self.record_last_action(self.current_player_index, PlayerActions::Check);
                     }
-                }
+                    else {
+                        println!("Check error");
+                    }
+                },
             PlayerActions::Call => {
-                if let Err(error) = self.backend_game.call(self.current_player_index) {
-                    println!("Call error: {}", error);
+                if self.backend_game.call(self.current_player_index).is_ok() {
+                    self.record_last_action(self.current_player_index, PlayerActions::Call);
                 }
-            }
+                else {
+                    println!("Call error");
+                }
+            },
             PlayerActions::Fold => {
                 self.backend_game.fold(self.current_player_index);
-            }
+                self.record_last_action(self.current_player_index, PlayerActions::Fold);
+
+                self.check_fold_win();
+            },
+            PlayerActions::AllIn => {
+                if self.backend_game.all_in(self.current_player_index).is_ok() {
+                    self.record_last_action(self.current_player_index, PlayerActions::AllIn);
+
+                    for (i, player) in self.backend_game.players.iter().enumerate() {
+                        if i != self.current_player_index && !player.is_folded {
+                            self.player_actions_done[i] = false;
+                        }
+                    }
+                }
+                else {
+                    println!("All in error");
+                }
+            },
             PlayerActions::None => return Ok(()),
         }
 
@@ -311,6 +393,17 @@ impl EventHandler for MyGame {
         self.slider_max = self.players[self.current_player_index].chips;
         self.slider_value = self.slider_value.min(self.slider_max);
     }
+
+        // Check if both all in
+        let both_all_in = self.backend_game.players
+        .iter()
+        .filter(|predicate| !predicate.is_folded).all(|predicate| predicate.is_all_in);
+
+        if both_all_in {
+            self.draw_remaining_community_cards();
+            self.backend_game.reset_pot();
+            self.game_state = GameState::Showdown;
+        }
 
         // Check if round is ready to advance
         let all_acted = self.player_actions_done
@@ -332,7 +425,7 @@ impl EventHandler for MyGame {
                             self.backend_game.board.extend(flop_cards);
                         }
                         self.reset_actions();
-                        self.backend_game.reset_round();
+                        self.backend_game.reset_pot();
                         self.game_state = GameState::Flop;
                     
                 },
@@ -343,7 +436,7 @@ impl EventHandler for MyGame {
                             self.backend_game.board.extend(turn_card);
                         }
                         self.reset_actions();
-                        self.backend_game.reset_round();
+                        self.backend_game.reset_pot();
                         self.players[self.current_player_index].last_action = Some(self.player_action.clone());
                         self.game_state = GameState::Turn;
                     
@@ -355,7 +448,7 @@ impl EventHandler for MyGame {
                             self.backend_game.board.extend(river_card);
                         }
                         self.reset_actions();
-                        self.backend_game.reset_round();
+                        self.backend_game.reset_pot();
                         self.players[self.current_player_index].last_action = Some(self.player_action.clone());
                         self.game_state = GameState::River;
                     
@@ -370,10 +463,12 @@ impl EventHandler for MyGame {
                     if self.winner_index.is_none() {
                         self.winner_index = Some(self.determine_winner());
                         self.backend_game.award_pot_to_winner();
+                        self.sync_pot_and_chips();
                         self.elapsed_time = 0.0; // Reset timer when entering showdown
                     }
                     // Check how many are alive and if someone has won the game
                     if self.elapsed_time > 3.0 {
+                        println!("Post-showdown chips: {:?}", self.players.iter().map(|p| p.chips).collect::<Vec<_>>()); // Debug print
                         let alive_players: Vec<_> = self.players
                         .iter()
                         .filter(|predicate| predicate.chips > 0)
@@ -389,6 +484,17 @@ impl EventHandler for MyGame {
                         // Otherwise restart round and keep going
                         else {
                             self.backend_game.reset_round();
+                            for player in self.backend_game.players.iter_mut() {
+                                match self.backend_game.deck.draw(2) {
+                                    Ok(cards) => {
+                                        player.hand.cards = cards;
+                                    }
+                                    Err(error) => {
+                                        println!("Failed to deal hand: {}", error);
+                                    }
+                                }
+                            }
+
                             self.sync_pot_and_chips();
                             self.reset_actions();
                             self.game_state = GameState::Preflop;
@@ -545,7 +651,6 @@ impl EventHandler for MyGame {
                     if is_winner {
                         parameter = parameter.color(Color::from_rgb(255, 255, 150));
                     }
-        
                     canvas.draw(card_image, parameter);
                 }
             }
@@ -591,7 +696,7 @@ impl EventHandler for MyGame {
     );
 
         // Draw action buttons
-        let button_labbels = ["Bet", "Check", "Call", "Fold"];
+        let button_labbels = ["Bet", "Check", "Call", "Fold", "All in"];
         
         for (i, label) in button_labbels.iter().enumerate() {
             let x = 50.0 + i as f32 * 130.0;
@@ -656,12 +761,12 @@ impl EventHandler for MyGame {
 
         // Draw textbox with chosen playeraction 
         for player in &self.players {
-            if let Some(action) = &player.last_action {
+            if let Some(ref action) = player.last_action {
                 let text = Text::new(format!("{:?}", action));
                 canvas.draw(
                     &text, 
                     DrawParam::default()
-                    .dest(player.position + Vec2::new(0.0, 150.0))
+                    .dest(player.position + Vec2::new(0.0, -30.0))
                     .color(Color::WHITE)
                 );
             }
@@ -671,7 +776,7 @@ impl EventHandler for MyGame {
         if let Some(ref message) = self.game_over_message {
             let fragment = TextFragment::new(message.as_str()).scale(36.0);
             let text = Text::new(fragment);
-            let screen_center = Vec2::new(screen_width / 2.0, screen_height / 2.0);
+            let screen_center = Vec2::new(100.0, screen_height / 2.0);
             canvas.draw(&text, DrawParam::default().dest(screen_center));
         }
         canvas.finish(context)?;
@@ -694,6 +799,7 @@ impl EventHandler for MyGame {
                     (PlayerActions::Check, Rect::new(180.0, 100.0, 120.0, 50.0)),
                     (PlayerActions::Call, Rect::new(310.0, 100.0, 120.0, 50.0)),
                     (PlayerActions::Fold, Rect::new(440.0, 100.0, 120.0, 50.0)),
+                    (PlayerActions::AllIn, Rect::new(570.0, 100.0, 120.0, 50.0)),
                 ];
 
                 for (action, rect) in buttons.iter() {
@@ -750,6 +856,9 @@ impl EventHandler for MyGame {
                         let percent = (clamped_x - slider_x) / slider_width;
                         self.slider_value = ((percent * self.slider_max as f32).round()) as u32;
                     }
+                }
+                if self.players[self.current_player_index].backend_player.is_all_in {
+                    return Ok(());
                 }
             }
             Ok(())

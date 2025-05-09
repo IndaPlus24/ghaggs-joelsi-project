@@ -1,6 +1,7 @@
 pub mod structs;
 
-use poker_eval; // https://docs.rs/poker_eval/latest/poker_eval/
+use poker_eval;
+use structs::hand::Hand; // https://docs.rs/poker_eval/latest/poker_eval/
 
 use std::sync::Arc;
 
@@ -90,6 +91,28 @@ impl Game {
         self.players[player_index].is_folded = true;
     }
 
+    pub fn all_in(&mut self, player_index: usize) -> Result<(), &'static str> {
+        let player = &mut self.players[player_index];
+
+        // Player must have chips to go all in
+        if player.chips.chips == 0 {
+            return Err("Player has no chips to go all-in")
+        }
+
+        let all_in_amount = player.chips.chips;
+
+        // Deduct all the chips from the player and add it to the pot
+        player.chips.deduct(all_in_amount);
+        self.pot.add_constribution(player_index, all_in_amount);
+
+        self.pot.current_bet = self.pot.current_bet.max(all_in_amount);
+
+        player.is_all_in = true;
+
+        self.pot.player_bets[player_index] = all_in_amount;
+        Ok(())
+    }
+
     // Check how many players that haven't folded, true or false.
     pub fn non_folded_players_match_bet(&self) -> bool {
         for (i, player) in self.players.iter().enumerate() {
@@ -105,6 +128,12 @@ impl Game {
         true
     }
 
+    pub fn award_pot_to_specific_player(&mut self, winner_index: usize) {
+        let winnings = self.pot.total;
+        self.players[winner_index].chips.chips += winnings;
+        self.pot.total = 0;
+    }
+
     // Award the pot to the winner of the round
     pub fn award_pot_to_winner(&mut self) {
         let winner_index = self.best_hand();
@@ -113,9 +142,23 @@ impl Game {
         self.pot.reset();
     }
 
-    // Reset pot after a round
+    pub fn reset_pot(&mut self) {
+        self.pot.reset_round();
+    }
+
+    // Reset round
     pub fn reset_round(&mut self) {
         self.pot.reset_round();
+        self.board.clear(); // Clear community cards
+
+        // Reset each player's hand and folded status
+        for player in &mut self.players {
+            player.hand = Hand::new();
+            player.is_folded = false;
+        }
+
+        self.deck = Deck::new();
+        self.deck.shuffle();
     }
 
     // Reset the game after a player wins to be able to play again if wanted
